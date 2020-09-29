@@ -84,6 +84,7 @@ func StoreRel(addr *uint32, v uint32)
 //go:nosplit
 //Go中的CAS方法
 //比较并交换(compare and swap, CAS)，是原子操作的一种，可用于在多线程编程中实现不被打断的数据交换操作，从而避免多线程同时改写某一数据时由于执行顺序不确定性以及中断的不可预知性产生的数据不一致问题。 该操作通过将内存中的值与指定数据进行比较，当数值一样时将内存中的数据替换为新的值。
+//获取的乐观锁
 func goCas64(addr *uint64, old, new uint64) bool {
 	if uintptr(unsafe.Pointer(addr))&7 != 0 {
 		*(*int)(nil) = 0 // crash on unaligned uint64
@@ -100,6 +101,7 @@ func goCas64(addr *uint64, old, new uint64) bool {
 }
 
 //go:nosplit
+//加法的乐观锁
 func goXadd64(addr *uint64, delta int64) uint64 {
 	if uintptr(unsafe.Pointer(addr))&7 != 0 {
 		*(*int)(nil) = 0 // crash on unaligned uint64
@@ -114,6 +116,7 @@ func goXadd64(addr *uint64, delta int64) uint64 {
 }
 
 //go:nosplit
+//乘法的乐观锁
 func goXchg64(addr *uint64, v uint64) uint64 {
 	if uintptr(unsafe.Pointer(addr))&7 != 0 {
 		*(*int)(nil) = 0 // crash on unaligned uint64
@@ -128,6 +131,7 @@ func goXchg64(addr *uint64, v uint64) uint64 {
 }
 
 //go:nosplit
+//赋值的乐观锁
 func goLoad64(addr *uint64) uint64 {
 	if uintptr(unsafe.Pointer(addr))&7 != 0 {
 		*(*int)(nil) = 0 // crash on unaligned uint64
@@ -141,6 +145,7 @@ func goLoad64(addr *uint64) uint64 {
 }
 
 //go:nosplit
+//存储的乐观锁
 func goStore64(addr *uint64, v uint64) {
 	if uintptr(unsafe.Pointer(addr))&7 != 0 {
 		*(*int)(nil) = 0 // crash on unaligned uint64
@@ -152,6 +157,7 @@ func goStore64(addr *uint64, v uint64) {
 }
 
 //go:nosplit
+//乐观锁下的或
 func Or8(addr *uint8, v uint8) {
 	// Align down to 4 bytes and use 32-bit CAS.
 	uaddr := uintptr(unsafe.Pointer(addr))
@@ -166,6 +172,7 @@ func Or8(addr *uint8, v uint8) {
 }
 
 //go:nosplit
+//乐观锁下的与
 func And8(addr *uint8, v uint8) {
 	// Align down to 4 bytes and use 32-bit CAS.
 	uaddr := uintptr(unsafe.Pointer(addr))
