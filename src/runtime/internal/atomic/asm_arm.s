@@ -19,7 +19,7 @@
 //		B	runtime∕internal∕atomic·armcas(SB)
 //
 
-//Go中的CAS源码
+//Go中的CAS汇编源码
 //比较并交换(compare and swap, CAS)，是原子操作的一种，可用于在多线程编程中实现不被打断的数据交换操作，从而避免多线程同时改写某一数据时由于执行顺序不确定性以及中断的不可预知性产生的数据不一致问题。 该操作通过将内存中的值与指定数据进行比较，当数值一样时将内存中的数据替换为新的值。
 TEXT runtime∕internal∕atomic·armcas(SB),NOSPLIT,$0-13
 	MOVW	ptr+0(FP), R1
