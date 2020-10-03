@@ -20,6 +20,7 @@ type Node interface {
 	aNode()
 }
 
+//语法五种结构 顶层声明有五大类型，分别是常量、类型、变量、函数和方法
 type node struct {
 	// commented out for now since not yet used
 	// doc  *Comment // nil means no comment(s) attached

@@ -14,6 +14,7 @@ import (
 const debug = false
 const trace = false
 
+//语法解释器
 type parser struct {
 	file  *PosBase
 	errh  ErrorHandler
@@ -372,6 +373,7 @@ func (p *parser) print(msg string) {
 // nil; all others are expected to return a valid non-nil node.
 
 // SourceFile = PackageClause ";" { ImportDecl ";" } { TopLevelDecl ";" } .
+//通过 got 来判断下一个 Token 是不是 package 关键字，如果是 package 关键字，就会执行 name 来匹配一个包名并将结果保存到返回的文件结构体中。
 func (p *parser) fileOrNil() *File {
 	if trace {
 		defer p.trace("file")()
@@ -401,6 +403,7 @@ func (p *parser) fileOrNil() *File {
 	}
 
 	// { TopLevelDecl ";" }
+	//顶层声明有五大类型，分别是常量、类型、变量、函数和方法
 	for p.tok != _EOF {
 		switch p.tok {
 		case _Const:
@@ -491,6 +494,7 @@ func (p *parser) list(open, sep, close token, f func() bool) Pos {
 }
 
 // appendGroup(f) = f | "(" { f ";" } ")" . // ";" is optional before ")"
+//appendGroup 方法会调用传入的 f 方法对输入流进行匹配并将匹配的结果追加到另一个参数 File 结构体中的 DeclList 数组中，import、const、var、type 和 func 声明语句都是调用 appendGroup 方法进行解析的。
 func (p *parser) appendGroup(list []Decl, f func(*Group) Decl) []Decl {
 	if p.tok == _Lparen {
 		g := new(Group)
