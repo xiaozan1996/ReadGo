@@ -324,6 +324,7 @@ func indexlit(n *Node) *Node {
 
 // The result of typecheck1 MUST be assigned back to n, e.g.
 // 	n.Left = typecheck1(n.Left, top)
+//真正的类型判断所在地
 func typecheck1(n *Node, top int) (res *Node) {
 	if enableTrace && trace {
 		defer tracePrint("typecheck1", n)(&res)
@@ -405,6 +406,7 @@ func typecheck1(n *Node, top int) (res *Node) {
 			return n
 		}
 
+	//切片
 	case OTARRAY:
 		ok |= ctxType
 		r := typecheck(n.Right, ctxType)
@@ -414,16 +416,16 @@ func typecheck1(n *Node, top int) (res *Node) {
 		}
 
 		var t *types.Type
-		if n.Left == nil {
+		if n.Left == nil { //[]int
 			t = types.NewSlice(r.Type)
-		} else if n.Left.Op == ODDD {
+		} else if n.Left.Op == ODDD { //[...]int
 			if !n.Diag() {
 				n.SetDiag(true)
 				yyerror("use of [...] array outside of array literal")
 			}
 			n.Type = nil
 			return n
-		} else {
+		} else { //[3]int
 			n.Left = indexlit(typecheck(n.Left, ctxExpr))
 			l := n.Left
 			if consttype(l) != CTINT {
@@ -460,6 +462,7 @@ func typecheck1(n *Node, top int) (res *Node) {
 		n.Right = nil
 		checkwidth(t)
 
+	//哈希
 	case OTMAP:
 		ok |= ctxType
 		n.Left = typecheck(n.Left, ctxType)
@@ -482,6 +485,7 @@ func typecheck1(n *Node, top int) (res *Node) {
 		n.Left = nil
 		n.Right = nil
 
+	//chanel
 	case OTCHAN:
 		ok |= ctxType
 		n.Left = typecheck(n.Left, ctxType)
@@ -1724,6 +1728,7 @@ func typecheck1(n *Node, top int) (res *Node) {
 			}
 		}
 
+	//make
 	case OMAKE:
 		ok |= ctxExpr
 		args := n.List.Slice()
