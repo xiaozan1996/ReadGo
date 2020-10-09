@@ -11,6 +11,7 @@
 package runtime
 
 // emitted by compiler, not referred to by go programs
+// 由编译器发出，不被go程序引用
 
 import "unsafe"
 

@@ -479,6 +479,7 @@ func New(et EType) *Type {
 }
 
 // NewArray returns a new fixed-length array Type.
+//创建数组的方法
 func NewArray(elem *Type, bound int64) *Type {
 	if bound < 0 {
 		Fatalf("NewArray: invalid bound %v", bound)

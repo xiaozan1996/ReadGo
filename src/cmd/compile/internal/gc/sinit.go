@@ -862,6 +862,7 @@ func maplit(n *Node, m *Node, init *Nodes) {
 	init.Append(a)
 }
 
+//负责初始化字面量
 func anylit(n *Node, var_ *Node, init *Nodes) {
 	t := n.Type
 	switch n.Op {
@@ -906,6 +907,9 @@ func anylit(n *Node, var_ *Node, init *Nodes) {
 			Fatalf("anylit: not struct/array")
 		}
 
+		//当元素数量小于或者等于 4 个时，会直接将数组中的元素放置在栈上；
+		//当元素数量大于 4 个时，会将数组中的元素放置到静态区并在运行时取出；
+		//总结起来，如果数组中元素的个数小于或者等于 4 个，那么所有的变量会直接在栈上初始化，如果数组元素大于 4 个，变量就会在静态存储区初始化然后拷贝到栈上，这些转换后的代码才会继续进入中间代码生成和机器码生成两个阶段，最后生成可以执行的二进制文件。
 		if var_.isSimpleName() && n.List.Len() > 4 {
 			// lay out static data
 			vstat := readonlystaticname(t)
