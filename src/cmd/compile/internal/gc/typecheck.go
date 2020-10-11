@@ -1045,18 +1045,18 @@ func typecheck1(n *Node, top int) (res *Node) {
 			}
 
 			if n.Right.Type != nil && !n.Right.Type.IsInteger() {
-				yyerror("non-integer %s index %v", why, n.Right)
+				yyerror("non-integer %s index %v", why, n.Right) //访问数组的索引是非整数时会直接报错
 				break
 			}
 
 			if !n.Bounded() && Isconst(n.Right, CTINT) {
 				x := n.Right.Int64()
 				if x < 0 {
-					yyerror("invalid %s index %v (index must be non-negative)", why, n.Right)
+					yyerror("invalid %s index %v (index must be non-negative)", why, n.Right) //访问数组的索引是负数时会直接报错
 				} else if t.IsArray() && x >= t.NumElem() {
-					yyerror("invalid array index %v (out of bounds for %d-element array)", n.Right, t.NumElem())
+					yyerror("invalid array index %v (out of bounds for %d-element array)", n.Right, t.NumElem()) //访问数组的索引越界时会直接报错
 				} else if Isconst(n.Left, CTSTR) && x >= int64(len(strlit(n.Left))) {
-					yyerror("invalid string index %v (out of bounds for %d-byte string)", n.Right, len(strlit(n.Left)))
+					yyerror("invalid string index %v (out of bounds for %d-byte string)", n.Right, len(strlit(n.Left))) //访问数组的索引越界时会直接报错
 				} else if n.Right.Val().U.(*Mpint).Cmp(maxintval[TINT]) > 0 {
 					yyerror("invalid %s index %v (index too large)", why, n.Right)
 				}

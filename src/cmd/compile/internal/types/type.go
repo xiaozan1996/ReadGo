@@ -491,6 +491,7 @@ func NewArray(elem *Type, bound int64) *Type {
 }
 
 // NewSlice returns the slice Type with element type elem.
+//创建切片的方法
 func NewSlice(elem *Type) *Type {
 	if t := elem.Cache.slice; t != nil {
 		if t.Elem() != elem {
