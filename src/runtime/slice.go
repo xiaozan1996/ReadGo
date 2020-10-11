@@ -80,6 +80,7 @@ func makeslicecopy(et *_type, tolen int, fromlen int, from unsafe.Pointer) unsaf
 	return to
 }
 
+//真正创建切片的方法
 func makeslice(et *_type, len, cap int) unsafe.Pointer {
 	mem, overflow := math.MulUintptr(et.size, uintptr(cap))
 	if overflow || mem > maxAlloc || len < 0 || len > cap {
@@ -122,6 +123,10 @@ func makeslice64(et *_type, len64, cap64 int64) unsafe.Pointer {
 // to calculate where to write new values during an append.
 // TODO: When the old backend is gone, reconsider this decision.
 // The SSA backend might prefer the new length or to return only ptr/cap and save stack space.
+//切片扩容
+//如果期望容量大于当前容量的两倍就会使用期望容量；
+//如果当前切片的长度小于 1024 就会将容量翻倍；
+//如果当前切片的长度大于 1024 就会每次增加 25% 的容量，直到新容量大于期望容量；
 func growslice(et *_type, old slice, cap int) slice {
 	if raceenabled {
 		callerpc := getcallerpc()
@@ -244,6 +249,7 @@ func isPowerOfTwo(x uintptr) bool {
 }
 
 // slicecopy is used to copy from a string or slice of pointerless elements into a slice.
+//切片拷贝
 func slicecopy(toPtr unsafe.Pointer, toLen int, fromPtr unsafe.Pointer, fromLen int, width uintptr) int {
 	if fromLen == 0 || toLen == 0 {
 		return 0
