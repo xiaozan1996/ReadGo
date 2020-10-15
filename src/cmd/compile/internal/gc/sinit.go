@@ -755,6 +755,7 @@ func slicelit(ctxt initContext, n *Node, var_ *Node, init *Nodes) {
 	init.Append(a)
 }
 
+//哈希map初始化
 func maplit(n *Node, m *Node, init *Nodes) {
 	// make the map var
 	a := nod(OMAKE, nil, nil)
@@ -772,7 +773,7 @@ func maplit(n *Node, m *Node, init *Nodes) {
 		}
 	}
 
-	if len(entries) > 25 {
+	if len(entries) > 25 {//一旦哈希表中元素的数量超过了 25 个，就会在编译期间创建两个数组分别存储键和值的信息，这些键值对会通过一个如下所示的 for 循环加入目标的哈希
 		// For a large number of entries, put them in an array and loop.
 
 		// build types [count]Tindex and [count]Tvalue
