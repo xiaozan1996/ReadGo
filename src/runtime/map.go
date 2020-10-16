@@ -53,6 +53,12 @@ package runtime
 // Keep in mind this data is for maximally loaded tables, i.e. just
 // before the table grows. Typical tables will be somewhat less loaded.
 
+/* Go 语言使用拉链法来解决哈希碰撞的问题实现了哈希表，它的访问、写入和删除等操作都在编译期间转换成了运行时的函数或者方法。
+
+哈希在每一个桶中存储键对应哈希的前 8 位，当对哈希进行操作时，这些 tophash 就成为了一级缓存帮助哈希快速遍历桶中元素，每一个桶都只能存储 8 个键值对，一旦当前哈希的某个桶超出 8 个，新的键值对就会被存储到哈希的溢出桶中。
+
+随着键值对数量的增加，溢出桶的数量和哈希的装载因子也会逐渐升高，超过一定范围就会触发扩容，扩容会将桶的数量翻倍，元素再分配的过程也是在调用写操作时增量进行的，不会造成性能的瞬时巨大抖动 */
+
 import (
 	"runtime/internal/atomic"
 	"runtime/internal/math"
@@ -605,7 +611,7 @@ func mapassign(t *maptype, h *hmap, key unsafe.Pointer) unsafe.Pointer {
 		h.buckets = newobject(t.bucket) // newarray(t.bucket, 1)
 	}
 
-again:
+again: //当哈希表正在处于扩容状态时，每次向哈希表写入值时都会触发 runtime.growWork 对哈希表的内容进行增量拷贝
 	bucket := hash & bucketMask(h.B)
 	if h.growing() {
 		growWork(t, h, bucket)
@@ -693,6 +699,7 @@ done:
 	return elem
 }
 
+//哈希表的删除逻辑与写入逻辑非常相似，只是触发哈希的删除需要使用关键字，
 func mapdelete(t *maptype, h *hmap, key unsafe.Pointer) {
 	if raceenabled && h != nil {
 		callerpc := getcallerpc()
@@ -720,7 +727,7 @@ func mapdelete(t *maptype, h *hmap, key unsafe.Pointer) {
 	h.flags ^= hashWriting
 
 	bucket := hash & bucketMask(h.B)
-	if h.growing() {
+	if h.growing() { //如果在删除期间遇到了哈希表的扩容，就会对即将操作的桶进行分流，分流结束之后会找到桶中的目标元素完成键值对的删除工作。
 		growWork(t, h, bucket)
 	}
 	b := (*bmap)(add(h.buckets, bucket*uintptr(t.bucketsize)))
@@ -1034,6 +1041,7 @@ func mapclear(t *maptype, h *hmap) {
 	h.flags &^= hashWriting
 }
 
+//哈希map扩容
 func hashGrow(t *maptype, h *hmap) {
 	// If we've hit the load factor, get bigger.
 	// Otherwise, there are too many overflow buckets,
@@ -1145,6 +1153,10 @@ type evacDst struct {
 	e unsafe.Pointer // pointer to current elem storage
 }
 
+//哈希表的数据迁移
+//函数会将一个旧桶中的数据分流到两个新桶，所以它会创建两个用于保存分配上下文的 evacDst 结构体，这两个结构体分别指向了一个新桶
+//如果这是一等量扩容，旧桶与新桶之间是一对一的关系，所以两个 evacDst 结构体只会初始化一个，当哈希表的容量翻倍时，每个旧桶的元素会都被分流到新创建的两个桶中
+//之前在分析哈希表访问函数 runtime.mapaccess1 时其实省略了扩容期间获取键值对的逻辑，当哈希表的 oldbuckets 存在时，就会先定位到旧桶并在该桶没有被分流时从中获取键值对
 func evacuate(t *maptype, h *hmap, oldbucket uintptr) {
 	b := (*bmap)(add(h.oldbuckets, oldbucket*uintptr(t.bucketsize)))
 	newbit := h.noldbuckets()
@@ -1259,6 +1271,7 @@ func evacuate(t *maptype, h *hmap, oldbucket uintptr) {
 	}
 }
 
+//最后会调用 runtime.advanceEvacuationMark 增加哈希的 nevacuate 计数器，在所有的旧桶都被分流后清空哈希的 oldbuckets 和 oldoverflow 字段
 func advanceEvacuationMark(h *hmap, t *maptype, newbit uintptr) {
 	h.nevacuate++
 	// Experiments suggest that 1024 is overkill by at least an order of magnitude.
