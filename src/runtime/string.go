@@ -77,6 +77,7 @@ func concatstring5(buf *tmpBuf, a [5]string) string {
 // n is the length of the slice.
 // Buf is a fixed-size buffer for the result,
 // it is not nil if the result does not escape.
+// 字节转字符串
 func slicebytetostring(buf *tmpBuf, ptr *byte, n int) (str string) {
 	if n == 0 {
 		// Turns out to be a relatively common case.
@@ -103,6 +104,7 @@ func slicebytetostring(buf *tmpBuf, ptr *byte, n int) (str string) {
 		return
 	}
 
+	//处理过后会根据传入的缓冲区大小决定是否需要为新的字符串分配一片内存空间，runtime.stringStructOf 会将传入的字符串指针转换成 stringStruct 结构体指针，然后设置结构体持有的字符串指针 str 和长度 len，最后通过 memmove 将原 []byte 中的字节全部复制到新的内存空间中。
 	var p unsafe.Pointer
 	if buf != nil && n <= len(buf) {
 		p = unsafe.Pointer(buf)
@@ -162,6 +164,7 @@ func slicebytetostringtmp(ptr *byte, n int) (str string) {
 	return
 }
 
+// 字符串转字节
 func stringtoslicebyte(buf *tmpBuf, s string) []byte {
 	var b []byte
 	if buf != nil && len(s) <= len(buf) {

@@ -666,6 +666,10 @@ func (s *scanner) rune() {
 	s.setLit(RuneLit, ok)
 }
 
+//解析字符串
+/* 标准字符串使用双引号表示开头和结尾；
+标准字符串中需要使用反斜杠 \ 来 escape 双引号；
+标准字符串中不能出现如下所示的隐式换行符号 \n； */
 func (s *scanner) stdString() {
 	ok := true
 	s.nextch()

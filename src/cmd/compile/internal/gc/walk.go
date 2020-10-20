@@ -421,6 +421,7 @@ func convFuncName(from, to *types.Type) (fnname string, needsaddr bool) {
 
 // The result of walkexpr MUST be assigned back to n, e.g.
 // 	n.Left = walkexpr(n.Left, init)
+
 func walkexpr(n *Node, init *Nodes) *Node {
 	if n == nil {
 		return n
@@ -2623,6 +2624,7 @@ func writebarrierfn(name string, l *types.Type, r *types.Type) *Node {
 	return fn
 }
 
+//拼接字符串
 func addstr(n *Node, init *Nodes) *Node {
 	// order.expr rewrote OADDSTR to have a list of strings.
 	c := n.List.Len()
@@ -2655,6 +2657,7 @@ func addstr(n *Node, init *Nodes) *Node {
 	}
 
 	var fn string
+	//如果需要拼接的字符串小于或者等于 5 个，那么就会直接调用 concatstring{2,3,4,5} 等一系列函数，如果超过 5 个就会直接选择 runtime.concatstrings 传入一个数组切片
 	if c <= 5 {
 		// small numbers of strings use direct runtime helpers.
 		// note: order.expr knows this cutoff too.
