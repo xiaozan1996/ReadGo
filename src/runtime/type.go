@@ -29,16 +29,16 @@ const (
 // ../reflect/type.go:/^type.rtype.
 // ../internal/reflectlite/type.go:/^type.rtype.
 type _type struct {
-	size       uintptr
+	size       uintptr //存储了类型占用的内存空间，为内存空间的分配提供信息
 	ptrdata    uintptr // size of memory prefix holding all pointers
-	hash       uint32
+	hash       uint32  //帮助我们快速确定类型是否相等
 	tflag      tflag
 	align      uint8
 	fieldAlign uint8
 	kind       uint8
 	// function for comparing objects of this type
 	// (ptr to object A, ptr to object B) -> ==?
-	equal func(unsafe.Pointer, unsafe.Pointer) bool
+	equal func(unsafe.Pointer, unsafe.Pointer) bool //用于判断当前类型的多个对象是否相等，该字段是为了减少 Go 语言二进制包大小从 typeAlg 结构体中迁移过来的
 	// gcdata stores the GC type data for the garbage collector.
 	// If the KindGCProg bit is set in kind, gcdata is a GC program.
 	// Otherwise it is a ptrmask bitmap. See mbitmap.go for details.

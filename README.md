@@ -6,4 +6,5 @@ go 源码阅读+中文注解
 10.11 /root/ReadGo/src/runtime/slice.go 切片的操作  
 10.15 /root/ReadGo/src/runtime/map.go 哈希map的操作  
 10.16 /root/ReadGo/src/runtime/map.go 哈希map的扩容  
-10.20 /root/ReadGo/src/runtime/string.go 字符串
+10.20 /root/ReadGo/src/runtime/string.go 字符串  
+11.1 /root/ReadGo/src/runtime/type.go 接口  
