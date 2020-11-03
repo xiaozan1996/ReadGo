@@ -34,7 +34,7 @@ const ptrSize = 4 << (^uintptr(0) >> 63) // unsafe.Sizeof(uintptr(0)) but an ide
 // To compare two Values, compare the results of the Interface method.
 // Using == on two Values does not compare the underlying values
 // they represent.
-type Value struct {
+type Value struct { //反射之变量
 	// typ holds the type of the value represented by a Value.
 	typ *rtype
 
@@ -1545,13 +1545,13 @@ func (v Value) send(x Value, nb bool) (selected bool) {
 // It panics if CanSet returns false.
 // As in Go, x's value must be assignable to v's type.
 func (v Value) Set(x Value) {
-	v.mustBeAssignable()
-	x.mustBeExported() // do not let unexported x leak
+	v.mustBeAssignable() //检查当前反射对象是否是可以被设置的
+	x.mustBeExported()   //字段是否是对外公开的
 	var target unsafe.Pointer
 	if v.kind() == Interface {
 		target = v.ptr
 	}
-	x = x.assignTo("reflect.Set", v.typ, target)
+	x = x.assignTo("reflect.Set", v.typ, target) //reflect.Value.Set 方法会调用 reflect.Value.assignTo 并返回一个新的反射对象，这个返回的反射对象指针就会直接覆盖原始的反射变量
 	if x.flag&flagIndir != 0 {
 		if x.ptr == unsafe.Pointer(&zeroVal[0]) {
 			typedmemclr(v.typ, v.ptr)
@@ -2338,6 +2338,7 @@ func Indirect(v Value) Value {
 
 // ValueOf returns a new Value initialized to the concrete value
 // stored in the interface i. ValueOf(nil) returns the zero Value.
+//先调用了 reflect.escapes 函数保证当前值逃逸到堆上，然后通过 reflect.unpackEface 方法从接口中获取 Value 结构体
 func ValueOf(i interface{}) Value {
 	if i == nil {
 		return Value{}
@@ -2401,10 +2402,10 @@ func NewAt(typ Type, p unsafe.Pointer) Value {
 	return Value{t.ptrTo(), p, fl}
 }
 
-// assignTo returns a value v that can be assigned directly to typ.
-// It panics if v is not assignable to typ.
-// For a conversion to an interface type, target is a suggested scratch space to use.
-// target must be initialized memory (or nil).
+/* reflect.Value.assignTo 会根据当前和被设置的反射对象类型创建一个新的 Value 结构体：
+
+如果两个反射对象的类型是可以被直接替换，就会直接将目标反射对象返回；
+如果当前反射对象是接口并且目标对象实现了接口，就会将目标对象简单包装成接口值； */
 func (v Value) assignTo(context string, dst *rtype, target unsafe.Pointer) Value {
 	if v.flag&flagMethod != 0 {
 		v = makeMethodValue(context, v)

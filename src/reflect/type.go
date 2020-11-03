@@ -35,7 +35,7 @@ import (
 // Type values are comparable, such as with the == operator,
 // so they can be used as map keys.
 // Two Type values are equal if they represent identical types.
-type Type interface {
+type Type interface { //反射之类型
 	// Methods applicable to all types.
 
 	// Align returns the alignment in bytes of a value of
@@ -1363,6 +1363,8 @@ func (t *structType) FieldByName(name string) (f StructField, present bool) {
 
 // TypeOf returns the reflection Type that represents the dynamic type of i.
 // If i is a nil interface value, TypeOf returns nil.
+//用于获取变量类型的 reflect.TypeOf 函数将传入的变量隐式转换成 emptyInterface 类型并获取其中存储的类型信息 rtype
+//reflect.TypeOf 函数的实现原理其实并不复杂，它只是将一个 interface{} 变量转换成了内部的 emptyInterface 表示，然后从中获取相应的类型信息。
 func TypeOf(i interface{}) Type {
 	eface := *(*emptyInterface)(unsafe.Pointer(&i))
 	return toType(eface.typ)
@@ -1459,6 +1461,7 @@ func (t *rtype) Comparable() bool {
 }
 
 // implements reports whether the type V implements the interface type T.
+//reflect.rtypes.Implements 方法会检查传入的类型是不是接口，如果不是接口或者是空值就会直接 panic 中止当前程序。在参数没有问题的情况下，上述方法会调用私有函数 reflect.implements 判断类型之间是否有实现关系：
 func implements(T, V *rtype) bool {
 	if T.Kind() != Interface {
 		return false
