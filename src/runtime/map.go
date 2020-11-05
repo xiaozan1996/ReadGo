@@ -866,7 +866,10 @@ func mapiterinit(t *maptype, h *hmap, it *hiter) {
 	mapiternext(it)
 }
 
+//遍历哈希时，重写哈希
 func mapiternext(it *hiter) {
+	/* 	在待遍历的桶为空时选择需要遍历的新桶；
+	在不存在待遍历的桶时返回 (nil, nil) 键值对并中止遍历过程； */
 	h := it.h
 	if raceenabled {
 		callerpc := getcallerpc()
@@ -913,6 +916,7 @@ next:
 		}
 		i = 0
 	}
+	//桶中找到下一个遍历的元素，在大多数情况下都会直接操作内存获取目标键值的内存地址，不过如果哈希表处于扩容期间就会调用 runtime.mapaccessK 函数获取键值对
 	for ; i < bucketCnt; i++ {
 		offi := (i + it.offset) & (bucketCnt - 1)
 		if isEmpty(b.tophash[offi]) || b.tophash[offi] == evacuatedEmpty {

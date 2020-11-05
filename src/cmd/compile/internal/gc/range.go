@@ -152,6 +152,7 @@ func cheapComputableIndex(width int64) bool {
 // simpler forms.  The result must be assigned back to n.
 // Node n may also be modified in place, and may also be
 // the returned node.
+//所有的 for/range 循环都会被 cmd/compile/internal/gc.walkrange 函数转换成不包含复杂结构、只包含基本表达式的语句
 func walkrange(n *Node) *Node {
 	if isMapClear(n) {
 		m := n.Right
@@ -210,6 +211,7 @@ func walkrange(n *Node) *Node {
 	default:
 		Fatalf("walkrange")
 
+	//遍历数组和切片
 	case TARRAY, TSLICE:
 		if arrayClear(n, v1, v2, a) {
 			lineno = lno
@@ -229,17 +231,20 @@ func walkrange(n *Node) *Node {
 		n.Right = nod(OAS, hv1, nod(OADD, hv1, nodintconst(1)))
 
 		// for range ha { body }
+		//使用 for range a {} 遍历数组和切片，不关心索引和数据的情况
 		if v1 == nil {
 			break
 		}
 
 		// for v1 := range ha { body }
+		//使用 for i := range a {} 遍历数组和切片，只关心索引的情况
 		if v2 == nil {
 			body = []*Node{nod(OAS, v1, hv1)}
 			break
 		}
 
 		// for v1, v2 := range ha { body }
+		//使用 for i, elem := range a {} 遍历数组和切片，关心索引和数据的情况
 		if cheapComputableIndex(n.Type.Elem().Width) {
 			// v1, v2 = hv1, ha[hv1]
 			tmp := nod(OINDEX, ha, hv1)
@@ -290,6 +295,7 @@ func walkrange(n *Node) *Node {
 		a = typecheck(a, ctxStmt)
 		n.List.Set1(a)
 
+	//遍历哈希
 	case TMAP:
 		// order.stmt allocated the iterator for us.
 		// we only use a once, so no copy needed.
@@ -326,6 +332,7 @@ func walkrange(n *Node) *Node {
 			body = []*Node{a}
 		}
 
+	//遍历通道
 	case TCHAN:
 		// order.stmt arranged for a copy of the channel variable.
 		ha := a
@@ -355,6 +362,8 @@ func walkrange(n *Node) *Node {
 		// See issue 15281.
 		body = append(body, nod(OAS, hv1, nil))
 
+	//遍历字符串
+	//遍历时会获取字符串中索引对应的字节并将字节转换成 rune
 	case TSTRING:
 		// Transform string range statements like "for v1, v2 = range a" into
 		//
