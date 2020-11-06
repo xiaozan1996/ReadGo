@@ -118,6 +118,8 @@ func block() {
 // ordinal position of its respective select{recv,send,default} call.
 // Also, if the chosen scase was a receive operation, it reports whether
 // a value was received.
+// 执行一些必要的初始化操作并确定 case 的处理顺序；
+// 在循环中根据 case 的类型做出不同的处理；
 func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, block bool) (int, bool) {
 	if debugSelect {
 		print("select: cas0=", cas0, "\n")
@@ -130,8 +132,8 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 
 	ncases := nsends + nrecvs
 	scases := cas1[:ncases:ncases]
-	pollorder := order1[:ncases:ncases]
-	lockorder := order1[ncases:][:ncases:ncases]
+	pollorder := order1[:ncases:ncases]          //轮询顺序
+	lockorder := order1[ncases:][:ncases:ncases] //加锁顺寻
 	// NOTE: pollorder/lockorder's underlying array was not zero-initialized by compiler.
 
 	// Even when raceenabled is true, there might be select
@@ -227,7 +229,7 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 	}
 
 	// lock all the channels involved in the select
-	sellock(scases, lockorder)
+	sellock(scases, lockorder) //按照之前生成的加锁顺序锁定 select 语句中包含所有的 Channel
 
 	var (
 		gp     *g
@@ -246,6 +248,16 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 	var caseSuccess bool
 	var caseReleaseTime int64 = -1
 	var recvOK bool
+
+	/* 	根据不同情况通过 goto 跳转到函数内部的不同标签执行相应的逻辑，其中包括：
+
+	bufrecv：可以从缓冲区读取数据；
+	bufsend：可以向缓冲区写入数据；
+	recv：可以从休眠的发送方获取数据；
+	send：可以向休眠的接收方发送数据；
+	rclose：可以从关闭的 Channel 读取 EOF；
+	sclose：向关闭的 Channel 发送数据；
+	retc：结束调用并返回； */
 	for _, casei := range pollorder {
 		casi = int(casei)
 		cas = &scases[casi]
@@ -410,6 +422,7 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 	goto retc
 
 bufrecv:
+	// 可以从缓冲区读取数据
 	// can receive from buffer
 	if raceenabled {
 		if cas.elem != nil {
@@ -436,6 +449,7 @@ bufrecv:
 	goto retc
 
 bufsend:
+	// 可以向缓冲区写入数据
 	// can send to buffer
 	if raceenabled {
 		raceacquire(chanbuf(c, c.sendx))
@@ -456,6 +470,7 @@ bufsend:
 
 recv:
 	// can receive from sleeping sender (sg)
+	// 可以从休眠的发送方获取数据
 	recv(c, sg, cas.elem, func() { selunlock(scases, lockorder) }, 2)
 	if debugSelect {
 		print("syncrecv: cas0=", cas0, " c=", c, "\n")
@@ -465,6 +480,7 @@ recv:
 
 rclose:
 	// read at end of closed channel
+	// 可以从关闭的 Channel 读取 EOF
 	selunlock(scases, lockorder)
 	recvOK = false
 	if cas.elem != nil {
@@ -477,6 +493,7 @@ rclose:
 
 send:
 	// can send to a sleeping receiver (sg)
+	// ：可以向休眠的接收方发送数据
 	if raceenabled {
 		raceReadObjectPC(c.elemtype, cas.elem, casePC(casi), chansendpc)
 	}
@@ -490,6 +507,7 @@ send:
 	goto retc
 
 retc:
+	// 结束调用并返回
 	if caseReleaseTime > 0 {
 		blockevent(caseReleaseTime-t0, 1)
 	}
@@ -497,6 +515,7 @@ retc:
 
 sclose:
 	// send on closed channel
+	// 向关闭的 Channel 发送数据
 	selunlock(scases, lockorder)
 	panic(plainError("send on closed channel"))
 }

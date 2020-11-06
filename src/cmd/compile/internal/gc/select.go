@@ -105,16 +105,26 @@ func walkselect(sel *Node) {
 	lineno = lno
 }
 
+/* 分四种情况介绍处理的过程和结果：
+
+select 不存在任何的 case；
+select 只存在一个 case；
+select 存在两个 case，其中一个 case 是 default；
+select 存在多个 case； */
 func walkselectcases(cases *Nodes) []*Node {
 	ncas := cases.Len()
 	sellineno := lineno
 
 	// optimization: zero-case select
+	// select 不存在任何的 case
+	//空的 select 语句会直接阻塞当前的 Goroutine，导致 Goroutine 进入无法被唤醒的永久休眠状态。
 	if ncas == 0 {
-		return []*Node{mkcall("block", nil, nil)}
+		return []*Node{mkcall("block", nil, nil)} //runtime.block 函数的实现非常简单，它会调用 runtime.gopark 让出当前 Goroutine 对处理器的使用权，传入的等待原因是 waitReasonSelectNoCases。
 	}
 
 	// optimization: one-case select: single op.
+	//select 只存在一个 case；
+	//如果当前的 select 条件只包含一个 case，那么就会将 select 改写成 if 条件语句
 	if ncas == 1 {
 		cas := cases.First()
 		setlineno(cas)
@@ -190,6 +200,7 @@ func walkselectcases(cases *Nodes) []*Node {
 	}
 
 	// optimization: two-case select but one is default: single non-blocking op.
+	// select 存在两个 case，其中一个 case 是 default；非阻塞操作
 	if ncas == 2 && dflt != nil {
 		cas := cases.First()
 		if cas == dflt {
@@ -207,7 +218,7 @@ func walkselectcases(cases *Nodes) []*Node {
 		case OSEND:
 			// if selectnbsend(c, v) { body } else { default body }
 			ch := n.Left
-			r.Left = mkcall1(chanfn("selectnbsend", 2, ch.Type), types.Types[TBOOL], &r.Ninit, ch, n.Right)
+			r.Left = mkcall1(chanfn("selectnbsend", 2, ch.Type), types.Types[TBOOL], &r.Ninit, ch, n.Right) //selectnbsend提供了向 Channel 非阻塞地发送数据的能力
 
 		case OSELRECV:
 			// if selectnbrecv(&v, c) { body } else { default body }
@@ -263,6 +274,10 @@ func walkselectcases(cases *Nodes) []*Node {
 	}
 
 	// register cases
+	//存在多个 case；常见流程
+	/* 	将所有的 case 转换成包含 Channel 以及类型等信息的 runtime.scase 结构体；
+	调用运行时函数 runtime.selectgo 从多个准备就绪的 Channel 中选择一个可执行的 runtime.scase 结构体；
+	通过 for 循环生成一组 if 语句，在语句中判断自己是不是被选中的 case */
 	for _, cas := range cases.Slice() {
 		setlineno(cas)
 
