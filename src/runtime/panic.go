@@ -220,6 +220,8 @@ func panicmemAddr(addr uintptr) {
 // Create a new deferred function fn with siz bytes of arguments.
 // The compiler turns a defer statement into a call to this.
 //go:nosplit
+//当 runtime._defer 分配在堆上时，Go 语言的编译器将 defer 转换成了 runtime.deferproc
+//为 defer 创建一个新的 runtime._defer 结构体、设置它的函数指针 fn、程序计数器 pc 和栈指针 sp 并将相关的参数拷贝到相邻的内存空间中
 func deferproc(siz int32, fn *funcval) { // arguments of fn follow fn
 	gp := getg()
 	if gp.m.curg != gp {
@@ -236,7 +238,7 @@ func deferproc(siz int32, fn *funcval) { // arguments of fn follow fn
 	argp := uintptr(unsafe.Pointer(&fn)) + unsafe.Sizeof(fn)
 	callerpc := getcallerpc()
 
-	d := newdefer(siz)
+	d := newdefer(siz) //为 defer 创建一个新的 runtime._defer 结构体
 	if d._panic != nil {
 		throw("deferproc: d.panic != nil after newdefer")
 	}
@@ -260,7 +262,7 @@ func deferproc(siz int32, fn *funcval) { // arguments of fn follow fn
 	// the code the compiler generates always
 	// checks the return value and jumps to the
 	// end of the function if deferproc returns != 0.
-	return0()
+	return0() //唯一一个不会触发延迟调用的函数，它可以避免递归调用 runtime.deferreturn 函数
 	// No code can go here - the C return register has
 	// been set and must not be clobbered.
 }
@@ -273,6 +275,10 @@ func deferproc(siz int32, fn *funcval) { // arguments of fn follow fn
 // Nosplit because the arguments on the stack won't be scanned
 // until the defer record is spliced into the gp._defer list.
 //go:nosplit
+// defer的栈上分配实现
+//  因为在编译期间我们已经创建了 runtime._defer 结构体，所以 runtime.deferprocStack 函数在运行期间我们只需要设置以为未在编译期间初始化的值并将栈上的结构体追加到函数的链表上
+//  除了分配位置的不同，栈上分配和堆上分配的 runtime._defer 并没有本质的不同
+//  堆是新建结构体然后连接，栈是在同一结构体内链表
 func deferprocStack(d *_defer) {
 	gp := getg()
 	if gp.m.curg != gp {
@@ -389,6 +395,12 @@ func init() {
 // stack map information when this is called.
 //
 //go:nosplit
+/* runtime.newdefer 的作用是想尽办法获得一个 runtime._defer 结构体，办法总共有三个：
+
+从调度器的延迟调用缓存池 sched.deferpool 中取出结构体并将该结构体追加到当前 Goroutine 的缓存池中；
+从 Goroutine 的延迟调用缓存池 pp.deferpool 中取出结构体；
+通过 runtime.mallocgc 在堆上创建一个新的结构体； */
+//无论使用哪种方式，只要获取到 runtime._defer 结构体，它都会被追加到所在 Goroutine _defer 链表的最前面。
 func newdefer(siz int32) *_defer {
 	var d *_defer
 	sc := deferclass(uintptr(siz))
@@ -443,6 +455,7 @@ func newdefer(siz int32) *_defer {
 // stack map when this is called.
 //
 //go:nosplit
+//jmpdefer 是一个用汇编语言实现的运行时函数，它的主要工作是跳转到 defer 所在的代码段并在执行结束之后跳转回 runtime.deferreturn
 func freedefer(d *_defer) {
 	if d._panic != nil {
 		freedeferpanic()
@@ -530,6 +543,7 @@ func freedeferfn() {
 // The single argument isn't actually used - it just has its address
 // taken so it can be matched against pending defers.
 //go:nosplit
+//会从 Goroutine 的 _defer 链表中取出最前面的 runtime._defer 结构体并调用 runtime.jmpdefer 函数传入需要执行的函数和参数
 func deferreturn(arg0 uintptr) {
 	gp := getg()
 	d := gp._defer
@@ -546,7 +560,7 @@ func deferreturn(arg0 uintptr) {
 			throw("unfinished open-coded defers in deferreturn")
 		}
 		gp._defer = d.link
-		freedefer(d)
+		freedefer(d) //jmpdefer 是一个用汇编语言实现的运行时函数，它的主要工作是跳转到 defer 所在的代码段并在执行结束之后跳转回 runtime.deferreturn
 		return
 	}
 
@@ -816,6 +830,7 @@ func readvarintUnsafe(fd unsafe.Pointer) (uint32, unsafe.Pointer) {
 // d. It normally processes all active defers in the frame, but stops immediately
 // if a defer does a successful recover. It returns true if there are no
 // remaining defers to run in the frame.
+// 开放编码执行defer
 func runOpenDeferFrame(gp *g, d *_defer) bool {
 	done := true
 	fd := d.fd

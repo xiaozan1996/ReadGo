@@ -205,6 +205,7 @@ func walkstmt(n *Node) *Node {
 		Curfn.Func.SetHasDefer(true)
 		Curfn.Func.numDefers++
 		if Curfn.Func.numDefers > maxOpenDefers {
+			//函数的 defer 数量少于或者等于 8 个
 			// Don't allow open-coded defers if there are more than
 			// 8 defers in the function, since we use a single
 			// byte to record active defers.
