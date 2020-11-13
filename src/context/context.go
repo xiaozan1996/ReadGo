@@ -233,8 +233,8 @@ func WithCancel(parent Context) (ctx Context, cancel CancelFunc) {
 	if parent == nil {
 		panic("cannot create context from nil parent")
 	}
-	c := newCancelCtx(parent)
-	propagateCancel(parent, &c)
+	c := newCancelCtx(parent)   //传入的上下文包装成私有结构体 context.cancelCtx
+	propagateCancel(parent, &c) //构建父子上下文之间的关联，当父上下文被取消时，子上下文也会被取消：
 	return &c, func() { c.cancel(true, Canceled) }
 }
 
@@ -247,26 +247,27 @@ func newCancelCtx(parent Context) cancelCtx {
 var goroutines int32
 
 // propagateCancel arranges for child to be canceled when parent is.
+//构建父子上下文之间的关联，当父上下文被取消时，子上下文也会被取消：
 func propagateCancel(parent Context, child canceler) {
 	done := parent.Done()
 	if done == nil {
-		return // parent is never canceled
+		return // parent is never canceled // 父上下文不会触发取消信号
 	}
 
 	select {
-	case <-done:
+	case <-done: // 父上下文已经被取消
 		// parent is already canceled
 		child.cancel(false, parent.Err())
 		return
 	default:
 	}
 
-	if p, ok := parentCancelCtx(parent); ok {
+	if p, ok := parentCancelCtx(parent); ok { //当 child 的继承链包含可以取消的上下文时，会判断 parent 是否已经触发了取消信号
 		p.mu.Lock()
-		if p.err != nil {
+		if p.err != nil { //如果已经被取消，child 会立刻被取消
 			// parent has already been canceled
 			child.cancel(false, p.err)
-		} else {
+		} else { //如果没有被取消，child 会被加入 parent 的 children 列表中，等待 parent 释放取消信号
 			if p.children == nil {
 				p.children = make(map[canceler]struct{})
 			}
@@ -274,6 +275,9 @@ func propagateCancel(parent Context, child canceler) {
 		}
 		p.mu.Unlock()
 	} else {
+		/* 		当父上下文是开发者自定义的类型、实现了 context.Context 协议并在 Done() 方法中返回了非空的管道时；
+				运行一个新的 Goroutine 同时监听 parent.Done() 和 child.Done() 两个 Channel
+		在 parent.Done() 关闭时调用 child.cancel 取消子上下文； */
 		atomic.AddInt32(&goroutines, +1)
 		go func() {
 			select {
