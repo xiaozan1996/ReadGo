@@ -922,13 +922,13 @@ type _defer struct {
 // _panic values only live on the stack, regular stack pointer
 // adjustment takes care of them.
 type _panic struct {
-	argp      unsafe.Pointer // pointer to arguments of deferred call run during panic; cannot move - known to liblink
-	arg       interface{}    // argument to panic
-	link      *_panic        // link to earlier panic
+	argp      unsafe.Pointer // pointer to arguments of deferred call run during panic; cannot move - known to liblink  指向 defer 调用时参数的指针
+	arg       interface{}    // argument to panic  调用 panic 时传入的参数
+	link      *_panic        // link to earlier panic  指向了更早调用的 runtime._panic 结构
 	pc        uintptr        // where to return to in runtime if this panic is bypassed
 	sp        unsafe.Pointer // where to return to in runtime if this panic is bypassed
-	recovered bool           // whether this panic is over
-	aborted   bool           // the panic was aborted
+	recovered bool           // whether this panic is over  表示当前 runtime._panic 是否被 recover 恢复
+	aborted   bool           // the panic was aborted   表示当前的 panic 是否被强行终止
 	goexit    bool
 }
 

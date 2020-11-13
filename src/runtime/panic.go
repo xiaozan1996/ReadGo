@@ -906,6 +906,11 @@ func reflectcallSave(p *_panic, fn, arg unsafe.Pointer, argsize uint32) {
 }
 
 // The implementation of the predeclared function panic.
+/* 编译器会将关键字 panic 转换成 runtime.gopanic，该函数的执行过程包含以下几个步骤：
+
+创建新的 runtime._panic 结构并添加到所在 Goroutine _panic 链表的最前面；
+在循环中不断从当前 Goroutine 的 _defer 中链表获取 runtime._defer 并调用 runtime.reflectcall 运行延迟调用函数；
+调用 runtime.fatalpanic 中止整个程序； */
 func gopanic(e interface{}) {
 	gp := getg()
 	if gp.m.curg != gp {
@@ -948,7 +953,7 @@ func gopanic(e interface{}) {
 	// gopanic frame (stack scanning is slow...)
 	addOneOpenDeferFrame(gp, getcallerpc(), unsafe.Pointer(getcallersp()))
 
-	for {
+	for { //在循环中不断从当前 Goroutine 的 _defer 中链表获取 runtime._defer 并调用 runtime.reflectcall 运行延迟调用函数
 		d := gp._defer
 		if d == nil {
 			break
@@ -1012,6 +1017,7 @@ func gopanic(e interface{}) {
 			gp._defer = d.link
 			freedefer(d)
 		}
+		// 程序的恢复 recover
 		if p.recovered {
 			gp._panic = p.link
 			if gp._panic != nil && gp._panic.goexit && gp._panic.aborted {
@@ -1079,9 +1085,9 @@ func gopanic(e interface{}) {
 	// Because it is unsafe to call arbitrary user code after freezing
 	// the world, we call preprintpanics to invoke all necessary Error
 	// and String methods to prepare the panic strings before startpanic.
-	preprintpanics(gp._panic)
+	preprintpanics(gp._panic) //打印出全部的 panic 消息以及调用时传入的参数
 
-	fatalpanic(gp._panic) // should not return
+	fatalpanic(gp._panic) // should not return  实现了无法被恢复的程序崩溃，它在中止程序之前会通过
 	*(*int)(nil) = 0      // not reached
 }
 
@@ -1171,7 +1177,7 @@ func recovery(gp *g) {
 	gp.sched.pc = pc
 	gp.sched.lr = 0
 	gp.sched.ret = 1
-	gogo(&gp.sched)
+	gogo(&gp.sched) //跳回 defer 关键字调用的位置
 }
 
 // fatalthrow implements an unrecoverable runtime throw. It freezes the
