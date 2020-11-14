@@ -23,9 +23,17 @@ func throw(string) // provided by runtime
 //
 // A Mutex must not be copied after first use.
 type Mutex struct {
-	state int32
-	sema  uint32
+	state int32  //表示当前互斥锁的状态
+	sema  uint32 //用于控制锁状态的信号量
 }
+
+/*
+互斥锁的状态
+mutexLocked — 表示互斥锁的锁定状态；
+mutexWoken — 表示从正常模式被从唤醒；
+mutexStarving — 当前的互斥锁进入饥饿状态；
+waitersCount — 当前互斥锁上等待的 Goroutine 个数；
+*/
 
 // A Locker represents an object that can be locked and unlocked.
 type Locker interface {
@@ -81,6 +89,12 @@ func (m *Mutex) Lock() {
 	m.lockSlow()
 }
 
+/* 尝试通过自旋（Spinnig）等方式等待锁的释放，该方法的主体是一个非常大 for 循环，这里将该方法分成几个部分介绍获取锁的过程：
+
+判断当前 Goroutine 能否进入自旋；
+通过自旋等待互斥锁的释放；
+计算互斥锁的最新状态；
+更新互斥锁的状态并获取锁； */
 func (m *Mutex) lockSlow() {
 	var waitStartTime int64
 	starving := false

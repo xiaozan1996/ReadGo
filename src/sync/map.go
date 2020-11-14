@@ -100,8 +100,10 @@ func newEntry(i interface{}) *entry {
 // value is present.
 // The ok result indicates whether value was found in the map.
 func (m *Map) Load(key interface{}) (value interface{}, ok bool) {
+	// 1、先读read
 	read, _ := m.read.Load().(readOnly)
 	e, ok := read.m[key]
+	// 2、如果read中没有，则加锁读dirty
 	if !ok && read.amended {
 		m.mu.Lock()
 		// Avoid reporting a spurious miss if m.dirty got promoted while we were
@@ -111,6 +113,7 @@ func (m *Map) Load(key interface{}) (value interface{}, ok bool) {
 		e, ok = read.m[key]
 		if !ok && read.amended {
 			e, ok = m.dirty[key]
+			// 调用missLocked，递增misses，如果misses>len(dirty)，那么把dirty提升为read，清空原来的dirty
 			// Regardless of whether the entry was present, record a miss: this key
 			// will take the slow path until the dirty map is promoted to the read
 			// map.
@@ -134,10 +137,17 @@ func (e *entry) load() (value interface{}, ok bool) {
 
 // Store sets the value for a key.
 func (m *Map) Store(key, value interface{}) {
+	// 先检查是否已经存在该元素，存在的话，直接通过read中的entry来更新值；
 	read, _ := m.read.Load().(readOnly)
 	if e, ok := read.m[key]; ok && e.tryStore(&value) {
+		// tryStore 通过atomic的cas来解决冲突，如果发现数据被置为expung，tryStore不写入数据，直接返回false
 		return
 	}
+	/**在read中不存在，先上锁：
+	1、double check发现read中存在的话，entry为expunged，尝试把expunged替换成nil，如果entry.p==expunged则复制到dirty中，再写入值；否则不用替换直接写入值。
+	2、dirty中存在：直接更新
+	3、dirty中不存在：如果dirty为空，那么需要将read复制到dirty中，最后再把新值写入到dirty中。复制的时候调用的是dirtyLocked()，在复制到dirty的时候，read中为nil的元素，会更新为expunged，并且不复制到dirty中。
+	**/
 
 	m.mu.Lock()
 	read, _ = m.read.Load().(readOnly)
@@ -266,6 +276,7 @@ func (e *entry) tryLoadOrStore(i interface{}) (actual interface{}, loaded, ok bo
 // LoadAndDelete deletes the value for a key, returning the previous value if any.
 // The loaded result reports whether the key was present.
 func (m *Map) LoadAndDelete(key interface{}) (value interface{}, loaded bool) {
+	// 检查read中是否存在
 	read, _ := m.read.Load().(readOnly)
 	e, ok := read.m[key]
 	if !ok && read.amended {
@@ -274,7 +285,7 @@ func (m *Map) LoadAndDelete(key interface{}) (value interface{}, loaded bool) {
 		e, ok = read.m[key]
 		if !ok && read.amended {
 			e, ok = m.dirty[key]
-			delete(m.dirty, key)
+			delete(m.dirty, key) // 如果没有直接，删除dirty中的数据
 			// Regardless of whether the entry was present, record a miss: this key
 			// will take the slow path until the dirty map is promoted to the read
 			// map.
@@ -283,7 +294,7 @@ func (m *Map) LoadAndDelete(key interface{}) (value interface{}, loaded bool) {
 		m.mu.Unlock()
 	}
 	if ok {
-		return e.delete()
+		return e.delete() // 如果存在，read中的pointer置为nil，并且删除dirty数据
 	}
 	return nil, false
 }

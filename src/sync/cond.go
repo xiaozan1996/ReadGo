@@ -19,13 +19,13 @@ import (
 //
 // A Cond must not be copied after first use.
 type Cond struct {
-	noCopy noCopy
+	noCopy noCopy //用于保证结构体不会在编译期间拷贝
 
 	// L is held while observing or changing the condition
-	L Locker
+	L Locker //用于保护内部的 notify 字段，Locker 接口类型的变量
 
-	notify  notifyList
-	checker copyChecker
+	notify  notifyList  //一个 Goroutine 的链表，它是实现同步机制的核心结构
+	checker copyChecker // 用于禁止运行期间发生的拷贝
 }
 
 // NewCond returns a new Cond with Locker l.
@@ -51,9 +51,9 @@ func NewCond(l Locker) *Cond {
 //
 func (c *Cond) Wait() {
 	c.checker.check()
-	t := runtime_notifyListAdd(&c.notify)
+	t := runtime_notifyListAdd(&c.notify) //将等待计数器加一并解锁
 	c.L.Unlock()
-	runtime_notifyListWait(&c.notify, t)
+	runtime_notifyListWait(&c.notify, t) //等待其他 Goroutine 的唤醒并加锁
 	c.L.Lock()
 }
 
@@ -61,6 +61,7 @@ func (c *Cond) Wait() {
 //
 // It is allowed but not required for the caller to hold c.L
 // during the call.
+// 唤醒队列最前面的 Goroutine
 func (c *Cond) Signal() {
 	c.checker.check()
 	runtime_notifyListNotifyOne(&c.notify)
@@ -70,6 +71,7 @@ func (c *Cond) Signal() {
 //
 // It is allowed but not required for the caller to hold c.L
 // during the call.
+// 唤醒队列中全部的 Goroutine
 func (c *Cond) Broadcast() {
 	c.checker.check()
 	runtime_notifyListNotifyAll(&c.notify)

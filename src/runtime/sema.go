@@ -462,8 +462,8 @@ type notifyList struct {
 
 	// List of parked waiters.
 	lock mutex
-	head *sudog
-	tail *sudog
+	head *sudog //指向的链表的头
+	tail *sudog //指向的链表的尾
 }
 
 // less checks if a < b, considering a & b running counts that may overflow the
@@ -476,6 +476,7 @@ func less(a, b uint32) bool {
 // notifications. The caller must eventually call notifyListWait to wait for
 // such a notification, passing the returned ticket number.
 //go:linkname notifyListAdd sync.runtime_notifyListAdd
+// 将等待计数器加一并解锁
 func notifyListAdd(l *notifyList) uint32 {
 	// This may be called concurrently, for example, when called from
 	// sync.Cond.Wait while holding a RWMutex in read mode.
@@ -485,6 +486,8 @@ func notifyListAdd(l *notifyList) uint32 {
 // notifyListWait waits for a notification. If one has been sent since
 // notifyListAdd was called, it returns immediately. Otherwise, it blocks.
 //go:linkname notifyListWait sync.runtime_notifyListWait
+// 等待其他 Goroutine 的唤醒并加锁
+// 会获取当前 Goroutine 并将它追加到 Goroutine 通知链表的最末端
 func notifyListWait(l *notifyList, t uint32) {
 	lockWithRank(&l.lock, lockRankNotifyList)
 
@@ -519,6 +522,7 @@ func notifyListWait(l *notifyList, t uint32) {
 
 // notifyListNotifyAll notifies all entries in the list.
 //go:linkname notifyListNotifyAll sync.runtime_notifyListNotifyAll
+// 唤醒全部
 func notifyListNotifyAll(l *notifyList) {
 	// Fast-path: if there are no new waiters since the last notification
 	// we don't need to acquire the lock.
@@ -551,6 +555,7 @@ func notifyListNotifyAll(l *notifyList) {
 
 // notifyListNotifyOne notifies one entry in the list.
 //go:linkname notifyListNotifyOne sync.runtime_notifyListNotifyOne
+// 唤醒单个
 func notifyListNotifyOne(l *notifyList) {
 	// Fast-path: if there are no new waiters since the last notification
 	// we don't need to acquire the lock at all.

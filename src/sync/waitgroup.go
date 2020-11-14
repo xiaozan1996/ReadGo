@@ -18,14 +18,14 @@ import (
 //
 // A WaitGroup must not be copied after first use.
 type WaitGroup struct {
-	noCopy noCopy
+	noCopy noCopy //保证 sync.WaitGroup 不会被开发者通过再赋值的方式拷贝
 
 	// 64-bit value: high 32 bits are counter, low 32 bits are waiter count.
 	// 64-bit atomic operations require 64-bit alignment, but 32-bit
 	// compilers do not ensure it. So we allocate 12 bytes and then use
 	// the aligned 8 bytes in them as state, and the other 4 as storage
 	// for the sema.
-	state1 [3]uint32
+	state1 [3]uint32 // 存储着状态和信号量
 }
 
 // state returns pointers to the state and sema fields stored within wg.state1.
@@ -89,7 +89,7 @@ func (wg *WaitGroup) Add(delta int) {
 	}
 	// Reset waiters count to 0.
 	*statep = 0
-	for ; w != 0; w-- {
+	for ; w != 0; w-- { //调用计数器归零，也就是所有任务都执行完成时，就会通过 sync.runtime_Semrelease 唤醒处于等待状态的所有 Goroutine
 		runtime_Semrelease(semap, false, 0)
 	}
 }
