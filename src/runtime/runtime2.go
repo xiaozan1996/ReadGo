@@ -670,26 +670,26 @@ type p struct {
 
 	// Lock for timers. We normally access the timers while running
 	// on this P, but the scheduler can also do it from a different P.
-	timersLock mutex
+	timersLock mutex //用于保护计时器的互斥锁
 
 	// Actions to take at some time. This is used to implement the
 	// standard library's time package.
 	// Must hold timersLock to access.
-	timers []*timer
+	timers []*timer //存储计时器的最小四叉堆
 
 	// Number of timers in P's heap.
 	// Modified using atomic instructions.
-	numTimers uint32
+	numTimers uint32 //处理器中的计时器数量
 
 	// Number of timerModifiedEarlier timers on P's heap.
 	// This should only be modified while holding timersLock,
 	// or while the timer status is in a transient state
 	// such as timerModifying.
-	adjustTimers uint32
+	adjustTimers uint32 //处理器中处于 timerModifiedEarlier 状态的计时器数量
 
 	// Number of timerDeleted timers in P's heap.
 	// Modified using atomic instructions.
-	deletedTimers uint32
+	deletedTimers uint32 //处理器中处于 timerDeleted 状态的计时器数量
 
 	// Race context used while executing timer functions.
 	timerRaceCtx uintptr

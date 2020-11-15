@@ -23,17 +23,17 @@ type timer struct {
 	// Timer wakes up at when, and then at when+period, ... (period > 0 only)
 	// each time calling f(arg, now) in the timer goroutine, so f must be
 	// a well-behaved function and not block.
-	when   int64
-	period int64
-	f      func(interface{}, uintptr)
-	arg    interface{}
+	when   int64                      // 当前计时器被唤醒的时间
+	period int64                      // 两次被唤醒的间隔
+	f      func(interface{}, uintptr) // 每当计时器被唤醒时都会调用的函数
+	arg    interface{}                // 计时器被唤醒时调用 f 传入的参数
 	seq    uintptr
 
 	// What to set the when field to in timerModifiedXX status.
-	nextwhen int64
+	nextwhen int64 //计时器处于 timerModifiedXX 状态时，用于设置 when 字段
 
 	// The status field holds one of the values below.
-	status uint32
+	status uint32 // 计时器的状态
 }
 
 // Code outside this file has to be careful in using a timer value.
@@ -383,6 +383,7 @@ func dodeltimer(pp *p, i int) {
 // We are locked on the P when this is called.
 // It reports whether it saw no problems due to races.
 // The caller must have locked the timers for pp.
+// 删除四叉堆顶上的计时器
 func dodeltimer0(pp *p) {
 	if t := pp.timers[0]; t.pp.ptr() != pp {
 		throw("dodeltimer0: wrong P")
@@ -487,7 +488,7 @@ loop:
 		t.nextwhen = when
 
 		newStatus := uint32(timerModifiedLater)
-		if when < t.when {
+		if when < t.when { // 如果修改后的时间小于修改前时间，设置计时器的状态为 timerModifiedEarlier 并调用 runtime.netpollBreak 触发调度器的重新调度
 			newStatus = timerModifiedEarlier
 		}
 
@@ -533,6 +534,19 @@ func resettimer(t *timer, when int64) bool {
 // programs that create and delete timers; leaving them in the heap
 // slows down addtimer. Reports whether no timer problems were found.
 // The caller must have locked the timers for pp.
+/* runtime.cleantimers 函数只会处理计时器状态为 timerDeleted、timerModifiedEarlier 和 timerModifiedLater 的情况：
+
+如果计时器的状态为 timerDeleted；
+将计时器的状态修改成 timerRemoving；
+调用 runtime.dodeltimer0 删除四叉堆顶上的计时器；
+将计时器的状态修改成 timerRemoved；
+如果计时器的状态为 timerModifiedEarlier 或者 timerModifiedLater；
+将计时器的状态修改成 timerMoving；
+使用计时器下次触发的时间 nextWhen 覆盖 when；
+调用 runtime.dodeltimer0 删除四叉堆顶上的计时器；
+调用 runtime.doaddtimer 将计时器加入四叉堆中；
+将计时器的状态修改成 timerWaiting； */
+//runtime.cleantimers 函数会删除已经标记的计时器，修改状态为 timerModifiedXX 的计时器。
 func cleantimers(pp *p) {
 	gp := getg()
 	for {
@@ -557,7 +571,7 @@ func cleantimers(pp *p) {
 			if !atomic.Cas(&t.status, s, timerRemoving) {
 				continue
 			}
-			dodeltimer0(pp)
+			dodeltimer0(pp) // 删除四叉堆顶上的计时器
 			if !atomic.Cas(&t.status, timerRemoving, timerRemoved) {
 				badTimer()
 			}
@@ -567,10 +581,10 @@ func cleantimers(pp *p) {
 				continue
 			}
 			// Now we can change the when field.
-			t.when = t.nextwhen
+			t.when = t.nextwhen // 使用计时器下次触发的时间 nextWhen 覆盖 when
 			// Move t to the right position.
-			dodeltimer0(pp)
-			doaddtimer(pp, t)
+			dodeltimer0(pp)   // 删除四叉堆顶上的计时器
+			doaddtimer(pp, t) // 将计时器加入四叉堆中
 			if s == timerModifiedEarlier {
 				atomic.Xadd(&pp.adjustTimers, -1)
 			}
@@ -637,6 +651,7 @@ func moveTimers(pp *p, timers []*timer) {
 // the correct place in the heap. While looking for those timers,
 // it also moves timers that have been modified to run later,
 // and removes deleted timers. The caller must have locked the timers for pp.
+// adjusttimers可能会遍历处理器堆中的全部计时器（包含退出条件），而不是只修改四叉堆顶部
 func adjusttimers(pp *p) {
 	if len(pp.timers) == 0 {
 		return
@@ -738,6 +753,7 @@ func nobarrierWakeTime(pp *p) int64 {
 // The caller must have locked the timers for pp.
 // If a timer is run, this will temporarily unlock the timers.
 //go:systemstack
+// 执行
 func runtimer(pp *p, now int64) int64 {
 	for {
 		t := pp.timers[0]
@@ -820,6 +836,15 @@ func runOneTimer(pp *p, t *timer, now int64) {
 	arg := t.arg
 	seq := t.seq
 
+	/* 	根据计时器的 period 字段，上述函数会做出不同的处理：
+
+	如果 period 字段大于 0；
+	修改计时器下一次触发的时间并更新其在堆中的位置；
+	将计时器的状态更新至 timerWaiting；
+	调用 runtime.updateTimer0When 函数设置处理器的 timer0When 字段；
+	如果 period 字段小于或者等于 0；
+	调用 runtime.dodeltimer0 函数删除计时器；
+	将计时器的状态更新至 timerNoStatus； */
 	if t.period > 0 {
 		// Leave in heap but adjust next time to fire.
 		delta := t.when - now
@@ -848,7 +873,7 @@ func runOneTimer(pp *p, t *timer, now int64) {
 
 	unlock(&pp.timersLock)
 
-	f(arg, seq)
+	f(arg, seq) //执行函数
 
 	lock(&pp.timersLock)
 

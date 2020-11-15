@@ -2756,6 +2756,7 @@ func dropg() {
 // it is always larger than the returned time.
 // We pass now in and out to avoid extra calls of nanotime.
 //go:yeswritebarrierrec
+// 调度器用来运行处理器中计时器
 func checkTimers(pp *p, now int64) (rnow, pollUntil int64, ran bool) {
 	// If there are no timers to adjust, and the first timer on
 	// the heap is not yet ready to run, then there is nothing to do.
@@ -2767,11 +2768,12 @@ func checkTimers(pp *p, now int64) (rnow, pollUntil int64, ran bool) {
 		if now == 0 {
 			now = nanotime()
 		}
-		if now < next {
+		if now < next { // 当下一个计时器没有到期并且需要删除的计时器较少时都会直接返回
 			// Next timer is not ready to run.
 			// But keep going if we would clear deleted timers.
 			// This corresponds to the condition below where
 			// we decide whether to call clearDeletedTimers.
+
 			if pp != getg().m.p.ptr() || int(atomic.Load(&pp.deletedTimers)) <= int(atomic.Load(&pp.numTimers)/4) {
 				return now, next, false
 			}
@@ -2780,7 +2782,7 @@ func checkTimers(pp *p, now int64) (rnow, pollUntil int64, ran bool) {
 
 	lock(&pp.timersLock)
 
-	adjusttimers(pp)
+	adjusttimers(pp) //如果处理器中存在需要调整的计时器，会调用 runtime.adjusttimers 函数
 
 	rnow = now
 	if len(pp.timers) > 0 {
@@ -2803,6 +2805,7 @@ func checkTimers(pp *p, now int64) (rnow, pollUntil int64, ran bool) {
 	// If this is the local P, and there are a lot of deleted timers,
 	// clear them out. We only do this for the local P to reduce
 	// lock contention on timersLock.
+	// 如果当前 Goroutine 的处理器和传入的处理器相同，并且处理器中删除的计时器是堆中计时器的 1/4 以上，就会调用 runtime.clearDeletedTimers 删除处理器全部被标记为 timerDeleted 的计时器，保证堆中靠后的计时器被删除
 	if pp == getg().m.p.ptr() && int(atomic.Load(&pp.deletedTimers)) > len(pp.timers)/4 {
 		clearDeletedTimers(pp)
 	}
@@ -4723,6 +4726,9 @@ func sysmon() {
 			asmcgocall(*cgo_yield, nil)
 		}
 		// poll network if not polled for more than 10ms
+		/* 定时器相关		调用 runtime.timeSleepUntil 函数获取计时器的到期时间以及持有该计时器的堆；
+		如果超过 10ms 的时间没有轮询，调用 runtime.netpoll 轮询网络；
+		如果当前有应该运行的计时器没有执行，可能因为存在无法被抢占的处理器，这时我们应该系统新的线程计时器； */
 		lastpoll := int64(atomic.Load64(&sched.lastpoll))
 		if netpollinited() && lastpoll != 0 && lastpoll+10*1000*1000 < now {
 			atomic.Cas64(&sched.lastpoll, uint64(lastpoll), uint64(now))
