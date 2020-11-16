@@ -301,6 +301,7 @@ func goschedguarded() {
 // Reason explains why the goroutine has been parked. It is displayed in stack
 // traces and heap dumps. Reasons should be unique and descriptive. Do not
 // re-use reasons, add new ones.
+// 主动挂起   将当前 Goroutine 暂停，被暂停的任务不会放回运行队列
 func gopark(unlockf func(*g, unsafe.Pointer) bool, lock unsafe.Pointer, reason waitReason, traceEv byte, traceskip int) {
 	if reason != waitReasonSleep {
 		checkTimeouts() // timeouts may expire while two goroutines keep the scheduler busy
@@ -327,6 +328,7 @@ func goparkunlock(lock *mutex, reason waitReason, traceEv byte, traceskip int) {
 	gopark(parkunlock_c, unsafe.Pointer(lock), reason, traceEv, traceskip)
 }
 
+//  Goroutine 唤醒
 func goready(gp *g, traceskip int) {
 	systemstack(func() {
 		ready(gp, traceskip, true)
@@ -546,6 +548,7 @@ func cpuinit() {
 //	call runtime·mstart
 //
 // The new G calls runtime·main.
+// 初始化调度器
 func schedinit() {
 	lockInit(&sched.lock, lockRankSched)
 	lockInit(&sched.sysmonlock, lockRankSysmon)
@@ -708,6 +711,7 @@ func fastrandinit() {
 }
 
 // Mark gp ready to run.
+// 将准备就绪的 Goroutine 的状态切换至 _Grunnable 并将其加入处理器的运行队列中，等待调度器的调度
 func ready(gp *g, traceskip int, next bool) {
 	if trace.enabled {
 		traceGoUnpark(gp, traceskip)
@@ -2157,6 +2161,7 @@ func gcstopm() {
 // acquiring a P in several places.
 //
 //go:yeswritebarrierrec
+// 将 Goroutine 调度到当前线程上
 func execute(gp *g, inheritTime bool) {
 	_g_ := getg()
 
@@ -2192,6 +2197,9 @@ func execute(gp *g, inheritTime bool) {
 
 // Finds a runnable goroutine to execute.
 // Tries to steal from other P's, get g from local or global queue, poll network.
+/* 从本地运行队列、全局运行队列中查找；
+从网络轮询器中查找是否有 Goroutine 等待运行；
+通过 runtime.runqsteal 函数尝试从其他随机的处理器中窃取待运行的 Goroutine，在该过程中还可能窃取处理器中的计时器； */
 func findrunnable() (gp *g, inheritTime bool) {
 	_g_ := getg()
 
@@ -2617,6 +2625,9 @@ func injectglist(glist *gList) {
 
 // One round of scheduler: find a runnable goroutine and execute it.
 // Never returns.
+/* 为了保证公平，当全局运行队列中有待执行的 Goroutine 时，通过 schedtick 保证有一定几率会从全局的运行队列中查找对应的 Goroutine；
+从处理器本地的运行队列中查找待执行的 Goroutine；
+如果前两种方法都没有找到 Goroutine，就会通过 runtime.findrunnable 进行阻塞地查找 Goroutine； */
 func schedule() {
 	_g_ := getg()
 
@@ -2840,6 +2851,7 @@ func parkunlock_c(gp *g, lock unsafe.Pointer) bool {
 }
 
 // park continuation on g0.
+// 将当前 Goroutine 的状态从 _Grunning 切换至 _Gwaiting，调用 runtime.dropg 移除线程和 Goroutine 之间的关联，在这之后就可以调用 runtime.schedule 触发新一轮的调度了
 func park_m(gp *g) {
 	_g_ := getg()
 
@@ -2964,6 +2976,7 @@ func goexit1() {
 }
 
 // goexit continuation on g0.
+// 调度结束，回到gfree
 func goexit0(gp *g) {
 	_g_ := getg()
 
@@ -3085,6 +3098,13 @@ func save(pc, sp uintptr) {
 // because tracing can be enabled in the middle of syscall. We don't want the wait to hang.
 //
 //go:nosplit
+// 成 Goroutine 进入系统调用前的准备工作
+/* 禁止线程上发生的抢占，防止出现内存不一致的问题；
+保证当前函数不会触发栈分裂或者增长；
+保存当前的程序计数器 PC 和栈指针 SP 中的内容；
+将 Goroutine 的状态更新至 _Gsyscall；
+将 Goroutine 的处理器和线程暂时分离并更新处理器的状态到 _Psyscall；
+释放当前线程上的锁； */
 func reentersyscall(pc, sp uintptr) {
 	_g_ := getg()
 
@@ -3517,6 +3537,7 @@ func syscall_runtime_AfterExec() {
 }
 
 // Allocate a new g, with a stack big enough for stacksize bytes.
+/* 当调度器的 gFree 和处理器的 gFree 列表都不存在结构体时，运行时会调用 runtime.malg 初始化一个新的 runtime.g 结构体，如果申请的堆栈大小大于 0，在这里我们会通过 runtime.stackalloc 分配 2KB 的栈空间 */
 func malg(stacksize int32) *g {
 	newg := new(g)
 	if stacksize >= 0 {
@@ -3553,7 +3574,7 @@ func newproc(siz int32, fn *funcval) {
 	gp := getg()
 	pc := getcallerpc()
 	systemstack(func() {
-		newg := newproc1(fn, argp, siz, gp, pc)
+		newg := newproc1(fn, argp, siz, gp, pc) // 根据传入参数初始化一个 g 结构体
 
 		_p_ := getg().m.p.ptr()
 		runqput(_p_, newg, true)
@@ -3593,8 +3614,8 @@ func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerp
 	}
 
 	_p_ := _g_.m.p.ptr()
-	newg := gfget(_p_)
-	if newg == nil {
+	newg := gfget(_p_) // 先从处理器的 gFree 列表中查找空闲的 Goroutine
+	if newg == nil {   // 如果不存在空闲的 Goroutine，就会通过 runtime.malg 函数创建一个栈大小足够的新结构体
 		newg = malg(_StackMin)
 		casgstatus(newg, _Gidle, _Gdead)
 		allgadd(newg) // publishes with a g->status of Gdead so GC scanner doesn't look at uninitialized stack.
@@ -3619,6 +3640,7 @@ func newproc1(fn *funcval, argp unsafe.Pointer, narg int32, callergp *g, callerp
 	}
 	if narg > 0 {
 		memmove(unsafe.Pointer(spArg), argp, uintptr(narg))
+		//将 fn 函数的全部参数拷贝到栈上，argp 和 narg 分别是参数的内存空间和大小
 		// This is a stack-to-stack copy. If write barriers
 		// are enabled and the source stack is grey (the
 		// destination is always black), then perform a
@@ -3745,6 +3767,8 @@ func gfput(_p_ *p, gp *g) {
 
 // Get from gfree list.
 // If local list is empty, grab a batch from global list.
+/* 当处理器的 Goroutine 列表为空时，会将调度器持有的空闲 Goroutine 转移到当前处理器上，直到 gFree 列表中的 Goroutine 数量达到 32；
+当处理器的 Goroutine 数量充足时，会从列表头部返回一个新的 Goroutine； */
 func gfget(_p_ *p) *g {
 retry:
 	if _p_.gFree.empty() && (!sched.gFree.stack.empty() || !sched.gFree.noStack.empty()) {
@@ -4352,6 +4376,12 @@ func (pp *p) destroy() {
 // code, so the GC must not be running if the number of Ps actually changes.
 //
 // Returns list of Ps with local work, they need to be scheduled by the caller.
+/* 如果全局变量 allp 切片中的处理器数量少于期望数量，就会对切片进行扩容；
+使用 new 创建新的处理器结构体并调用 runtime.p.init 方法初始化刚刚扩容的处理器；
+通过指针将线程 m0 和处理器 allp[0] 绑定到一起；
+调用 runtime.p.destroy 方法释放不再使用的处理器结构；
+通过截断改变全局变量 allp 的长度保证与期望处理器数量相等；
+将除 allp[0] 之外的处理器 P 全部设置成 _Pidle 并加入到全局的空闲队列中； */
 func procresize(nprocs int32) *p {
 	assertLockHeld(&sched.lock)
 
@@ -5191,6 +5221,10 @@ const randomizeScheduler = raceenabled
 // If next is true, runqput puts g in the _p_.runnext slot.
 // If the run queue is full, runnext puts g on the global queue.
 // Executed only by the owner P.
+// 将新创建的 Goroutine 运行队列上，这既可能是全局的运行队列，也可能是处理器本地的运行队列
+/* 当 next 为 true 时，将 Goroutine 设置到处理器的 runnext 上作为下一个处理器执行的任务；
+当 next 为 false 并且本地运行队列还有剩余空间时，将 Goroutine 加入处理器持有的本地运行队列；
+当处理器的本地运行队列已经没有剩余空间时就会把本地队列中的一部分 Goroutine 和待加入的 Goroutine 通过 runqputslow 添加到调度器持有的全局运行队列上 */
 func runqput(_p_ *p, gp *g, next bool) {
 	if randomizeScheduler && next && fastrand()%2 == 0 {
 		next = false
