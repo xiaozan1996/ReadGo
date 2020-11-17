@@ -29,8 +29,9 @@ var (
 	netpollWakeSig uint32 // used to avoid duplicate calls of netpollBreak
 )
 
+//初始化网络轮询器
 func netpollinit() {
-	epfd = epollcreate1(_EPOLL_CLOEXEC)
+	epfd = epollcreate1(_EPOLL_CLOEXEC) // 调用 epollcreate1 创建一个新的 epoll 文件描述符，这个文件描述符会在整个程序的生命周期中使用
 	if epfd < 0 {
 		epfd = epollcreate(1024)
 		if epfd < 0 {
@@ -39,7 +40,7 @@ func netpollinit() {
 		}
 		closeonexec(epfd)
 	}
-	r, w, errno := nonblockingPipe()
+	r, w, errno := nonblockingPipe() // 创建一个用于通信的管道
 	if errno != 0 {
 		println("runtime: pipe failed with", -errno)
 		throw("runtime: pipe failed")
@@ -48,7 +49,7 @@ func netpollinit() {
 		events: _EPOLLIN,
 	}
 	*(**uintptr)(unsafe.Pointer(&ev.data)) = &netpollBreakRd
-	errno = epollctl(epfd, _EPOLL_CTL_ADD, r, &ev)
+	errno = epollctl(epfd, _EPOLL_CTL_ADD, r, &ev) // 使用 epollctl 将用于读取数据的文件描述符打包成 epollevent 事件加入监听
 	if errno != 0 {
 		println("runtime: epollctl failed with", -errno)
 		throw("runtime: epollctl failed")
@@ -61,6 +62,7 @@ func netpollIsPollDescriptor(fd uintptr) bool {
 	return fd == uintptr(epfd) || fd == netpollBreakRd || fd == netpollBreakWr
 }
 
+// 监听文件描述符上的边缘触发事件，创建事件并加入监听
 func netpollopen(fd uintptr, pd *pollDesc) int32 {
 	var ev epollevent
 	ev.events = _EPOLLIN | _EPOLLOUT | _EPOLLRDHUP | _EPOLLET
@@ -78,6 +80,7 @@ func netpollarm(pd *pollDesc, mode int) {
 }
 
 // netpollBreak interrupts an epollwait.
+// 唤醒网络轮询器，例如：计时器向前修改时间时会通过该函数中断网络轮询器
 func netpollBreak() {
 	if atomic.Cas(&netpollWakeSig, 0, 1) {
 		for {
@@ -103,6 +106,10 @@ func netpollBreak() {
 // delay < 0: blocks indefinitely
 // delay == 0: does not block, just polls
 // delay > 0: block for up to that many nanoseconds
+/* 轮询网络并返回一组已经准备就绪的 Goroutine，传入的参数会决定它的行为3；
+如果参数小于 0，无限期等待文件描述符就绪；
+如果参数等于 0，非阻塞地轮询网络；
+如果参数大于 0，阻塞特定时间轮询网络； */
 func netpoll(delay int64) gList {
 	if epfd == -1 {
 		return gList{}

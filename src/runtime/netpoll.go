@@ -81,16 +81,17 @@ type pollDesc struct {
 	closing bool
 	everr   bool    // marks event scanning error happened
 	user    uint32  // user settable cookie
-	rseq    uintptr // protects from stale read timers
-	rg      uintptr // pdReady, pdWait, G waiting for read or nil
-	rt      timer   // read deadline timer (set if rt.f != nil)
-	rd      int64   // read deadline
-	wseq    uintptr // protects from stale write timers
-	wg      uintptr // pdReady, pdWait, G waiting for write or nil
-	wt      timer   // write deadline timer
-	wd      int64   // write deadline
+	rseq    uintptr // protects from stale read timers 表示文件描述符被重用
+	rg      uintptr // pdReady, pdWait, G waiting for read or nil 二进制的信号量
+	rt      timer   // read deadline timer (set if rt.f != nil) 等待文件描述符的计时器
+	rd      int64   // read deadline 等待文件描述符可读的截止日期
+	wseq    uintptr // protects from stale write timers 计时器被重置
+	wg      uintptr // pdReady, pdWait, G waiting for write or nil 二进制的信号量
+	wt      timer   // write deadline timer 等待文件描述符的计时器
+	wd      int64   // write deadline 等待文件描述符可写的截止日期
 }
 
+// 运行时包中的全局变量，该结构体中包含一个用于保护轮询数据的互斥锁和链表头
 type pollCache struct {
 	lock  mutex
 	first *pollDesc
@@ -114,6 +115,7 @@ func poll_runtime_pollServerInit() {
 	netpollGenericInit()
 }
 
+// 网络io轮询器初始化
 func netpollGenericInit() {
 	if atomic.Load(&netpollInited) == 0 {
 		lockInit(&netpollInitLock, lockRankNetpollInit)
@@ -139,6 +141,7 @@ func poll_runtime_isPollServerDescriptor(fd uintptr) bool {
 }
 
 //go:linkname poll_runtime_pollOpen internal/poll.runtime_pollOpen
+// 重置轮询信息
 func poll_runtime_pollOpen(fd uintptr) (*pollDesc, int) {
 	pd := pollcache.alloc()
 	lock(&pd.lock)
@@ -160,7 +163,7 @@ func poll_runtime_pollOpen(fd uintptr) (*pollDesc, int) {
 	unlock(&pd.lock)
 
 	var errno int32
-	errno = netpollopen(fd, pd)
+	errno = netpollopen(fd, pd) // 初始化轮询事件
 	return pd, int(errno)
 }
 
