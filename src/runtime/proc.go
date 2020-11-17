@@ -1800,6 +1800,7 @@ var newmHandoff struct {
 //
 // id is optional pre-allocated m ID. Omit by passing -1.
 //go:nowritebarrierrec
+// 创建一个存储待执行函数和处理器的新结构体 runtime.m。运行时执行系统监控不需要处理器，系统监控的 Goroutine 会直接在创建的线程上运行
 func newm(fn func(), _p_ *p, id int64) {
 	mp := allocm(_p_, fn, id)
 	mp.nextp.set(_p_)
@@ -1832,6 +1833,7 @@ func newm(fn func(), _p_ *p, id int64) {
 	newm1(mp)
 }
 
+// 调用特定平台的 runtime.newsproc 通过系统调用 clone 创建一个新的线程并在新的线程中执行 runtime.mstart：
 func newm1(mp *m) {
 	if iscgo {
 		var ts cgothreadstart
@@ -4572,7 +4574,7 @@ func incidlelocked(v int32) {
 	unlock(&sched.lock)
 }
 
-// Check for deadlock situation.
+// Check for deadlock situation. 检查死锁
 // The check is based on number of running M's, if 0 -> deadlock.
 // sched.lock must be held.
 func checkdead() {
@@ -4607,7 +4609,9 @@ func checkdead() {
 		}
 	}
 
-	run := mcount() - sched.nmidle - sched.nmidlelocked - sched.nmsys
+	run := mcount() - sched.nmidle - sched.nmidlelocked - sched.nmsys //根据下一个待创建的线程 id 和释放的线程数得到系统中存在的线程数  nmidle 是处于空闲状态的线程数量   nmidlelocked 是处于锁定状态的线程数量  nmsys 是处于系统调用的线程数量
+
+	//利用上述几个线程相关数据，我们可以得到正在运行的线程数，如果线程数量大于 0，说明当前程序不存在死锁；如果线程数小于 0，说明当前程序的状态不一致；如果线程数等于 0，我们需要进一步检查程序的运行状态
 	if run > run0 {
 		return
 	}
@@ -4630,7 +4634,7 @@ func checkdead() {
 			grunning++
 		case _Grunnable,
 			_Grunning,
-			_Gsyscall:
+			_Gsyscall: // 当存在 Goroutine 处于 _Grunnable、_Grunning 和 _Gsyscall 状态时，意味着程序发生了死锁；
 			unlock(&allglock)
 			print("runtime: checkdead: find g ", gp.goid, " in status ", s, "\n")
 			throw("checkdead: runnable g")
@@ -4643,6 +4647,8 @@ func checkdead() {
 	}
 
 	// Maybe jump time forward for playground.
+	// 当运行时存在等待的 Goroutine 并且不存在正在运行的 Goroutine 时，我们会检查处理器中存在的计时器1
+	//如果处理器中存在等待的计时器，那么所有的 Goroutine 陷入休眠状态是合理的，不过如果不存在等待的计时器，运行时就会直接报错并退出程序
 	if faketime != 0 {
 		when, _p_ := timeSleepUntil()
 		if _p_ != nil {
@@ -4687,27 +4693,29 @@ var forcegcperiod int64 = 2 * 60 * 1e9
 // Always runs without a P, so write barriers are not allowed.
 //
 //go:nowritebarrierrec
+// 启动系统监控
 func sysmon() {
 	lock(&sched.lock)
 	sched.nmsys++
-	checkdead()
+	checkdead() // 检查是否存在死锁
 	unlock(&sched.lock)
 
 	lasttrace := int64(0)
 	idle := 0 // how many cycles in succession we had not wokeup somebody
 	delay := uint32(0)
 	for {
-		if idle == 0 { // start with 20us sleep...
+		if idle == 0 { // start with 20us sleep... 初始的休眠时间是 20μs
 			delay = 20
-		} else if idle > 50 { // start doubling the sleep after 1ms...
+		} else if idle > 50 { // start doubling the sleep after 1ms... 当系统监控在 50 个循环中都没有唤醒 Goroutine 时，休眠时间在每个循环都会倍增
 			delay *= 2
 		}
 		if delay > 10*1000 { // up to 10ms
 			delay = 10 * 1000
 		}
 		usleep(delay)
-		now := nanotime()
-		next, _ := timeSleepUntil()
+		now := nanotime()           // 获取当前时间
+		next, _ := timeSleepUntil() // 计时器下一次需要唤醒的时间
+		// 当前调度器需要执行垃圾回收或者所有处理器都处于闲置状态时，如果没有需要触发的计时器，那么系统监控可以暂时陷入休眠
 		if debug.schedtrace <= 0 && (sched.gcwaiting != 0 || atomic.Load(&sched.npidle) == uint32(gomaxprocs)) {
 			lock(&sched.lock)
 			if atomic.Load(&sched.gcwaiting) != 0 || atomic.Load(&sched.npidle) == uint32(gomaxprocs) {
@@ -4716,7 +4724,7 @@ func sysmon() {
 					unlock(&sched.lock)
 					// Make wake-up period small enough
 					// for the sampling to be correct.
-					sleep := forcegcperiod / 2
+					sleep := forcegcperiod / 2 // 强制 GC 的周期
 					if next-now < sleep {
 						sleep = next - now
 					}
@@ -4772,11 +4780,12 @@ func sysmon() {
 				// observes that there is no work to do and no other running M's
 				// and reports deadlock.
 				incidlelocked(-1)
-				injectglist(&list)
+				injectglist(&list) // 将所有处于就绪状态的 Goroutine 加入全局运行队列中
 				incidlelocked(1)
 			}
 		}
 		if next < now {
+			// 如果在这之后，我们发现下一个计时器需要触发的时间小于当前时间，这也就说明所有的线程可能正在忙于运行 Goroutine，系统监控会启动新的线程来触发计时器，避免计时器的到期时间有较大的偏差
 			// There are timers that should have already run,
 			// perhaps because there is an unpreemptible P.
 			// Try to start an M to run them.
@@ -4788,12 +4797,13 @@ func sysmon() {
 		}
 		// retake P's blocked in syscalls
 		// and preempt long running G's
+		// 抢占处于运行或者系统调用中的处理器
 		if retake(now) != 0 {
 			idle = 0
 		} else {
 			idle++
 		}
-		// check if we need to force a GC
+		// check if we need to force a GC 在满足条件时触发垃圾收集回收内存
 		if t := (gcTrigger{kind: gcTriggerTime, now: now}); t.test() && atomic.Load(&forcegc.idle) != 0 {
 			lock(&forcegc.lock)
 			forcegc.idle = 0
@@ -4839,6 +4849,7 @@ func retake(now int64) uint32 {
 		pd := &_p_.sysmontick
 		s := _p_.status
 		sysretake := false
+		// 当处理器处于 _Prunning 或者 _Psyscall 状态时，如果上一次触发调度的时间已经过去了 10ms，我们就会通过 runtime.preemptone 抢占当前处理器
 		if s == _Prunning || s == _Psyscall {
 			// Preempt G if it's running for too long.
 			t := int64(_p_.schedtick)
@@ -4852,6 +4863,7 @@ func retake(now int64) uint32 {
 				sysretake = true
 			}
 		}
+		//当处理器处于 _Psyscall 状态时，在满足以下两种情况下会调用 runtime.handoffp 让出处理器的使用权：当处理器的运行队列不为空或者不存在空闲处理器时2；当系统调用时间超过了 10ms 时
 		if s == _Psyscall {
 			// Retake P from syscall if it's there for more than 1 sysmon tick (at least 20us).
 			t := int64(_p_.syscalltick)

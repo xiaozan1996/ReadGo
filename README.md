@@ -18,4 +18,5 @@ go 源码阅读+中文注解
 11.15 /root/ReadGo/src/runtime/time.go 定时器  
 11.16 /root/ReadGo/src/runtime/chan.go Channel  
 11.17 /root/ReadGo/src/runtime/proc.go 调度器  
-11。17 /root/ReadGo/src/runtime/netpoll.go  网络轮询器  
+11.17 /root/ReadGo/src/runtime/netpoll.go  网络轮询器  
+11.18 /root/ReadGo/src/runtime/proc.go 系统监控  
