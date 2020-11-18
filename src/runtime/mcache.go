@@ -16,6 +16,7 @@ import (
 // must be specially handled.
 //
 //go:notinheap
+// Go 语言中的线程缓存
 type mcache struct {
 	// The following members are accessed on every malloc,
 	// so they are grouped here for better caching.
@@ -31,9 +32,10 @@ type mcache struct {
 	// tiny is a heap pointer. Since mcache is in non-GC'd memory,
 	// we handle it by clearing it in releaseAll during mark
 	// termination.
-	tiny             uintptr
-	tinyoffset       uintptr
-	local_tinyallocs uintptr // number of tiny allocs not counted in other stats
+	// 微对象分配器 专门为 16 字节以下的对象申请和管理内存
+	tiny             uintptr // 指向堆中的一篇内存
+	tinyoffset       uintptr // 下一个空闲内存所在的偏移量
+	local_tinyallocs uintptr // number of tiny allocs not counted in other stats 内存分配器中分配的对象个数
 
 	// The rest is not accessed on every malloc.
 
@@ -82,6 +84,7 @@ type stackfreelist struct {
 // dummy mspan that contains no free objects.
 var emptymspan mspan
 
+// 初始化线程缓存
 func allocmcache() *mcache {
 	var c *mcache
 	systemstack(func() {
@@ -91,7 +94,7 @@ func allocmcache() *mcache {
 		unlock(&mheap_.lock)
 	})
 	for i := range c.alloc {
-		c.alloc[i] = &emptymspan
+		c.alloc[i] = &emptymspan //空的占位符 emptymspan
 	}
 	c.next_sample = nextSample()
 	return c
@@ -119,6 +122,7 @@ func freemcache(c *mcache) {
 //
 // Must run in a non-preemptible context since otherwise the owner of
 // c could change.
+// 为线程缓存获取一个指定跨度类的内存管理单元，被替换的单元不能包含空闲的内存空间，而获取的单元中需要至少包含一个空闲对象用于分配内存
 func (c *mcache) refill(spc spanClass) {
 	// Return the current cached span to the central lists.
 	s := c.alloc[spc]

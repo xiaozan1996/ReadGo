@@ -626,10 +626,12 @@ func mallocinit() {
 // be transitioned to Ready before use.
 //
 // h must be locked.
+// 页堆用来申请虚拟内存的方法
 func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
 	n = alignUp(n, heapArenaBytes)
 
 	// First, try the arena pre-reservation.
+	// 首先，该方法会尝试在预保留的区域申请内存
 	v = h.arena.alloc(n, heapArenaBytes, &memstats.heap_sys)
 	if v != nil {
 		size = n
@@ -637,6 +639,7 @@ func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
 	}
 
 	// Try to grow the heap at a hint address.
+	// 方法在预先保留的内存中申请一块可以使用的空间。如果没有可用的空间，我们会根据页堆的 arenaHints 在目标地址上尝试扩容
 	for h.arenaHints != nil {
 		hint := h.arenaHints
 		p := hint.addr
@@ -650,7 +653,7 @@ func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
 			// Outside addressable heap. Can't use.
 			v = nil
 		} else {
-			v = sysReserve(unsafe.Pointer(p), n)
+			v = sysReserve(unsafe.Pointer(p), n) //从操作系统中申请内存并将内存转换至 Prepared 状态
 		}
 		if p == uintptr(v) {
 			// Success. Update the hint.
@@ -983,6 +986,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	noscan := typ == nil || typ.ptrdata == 0
 	if size <= maxSmallSize {
 		if noscan && size < maxTinySize {
+			// 微对象分配
 			// Tiny allocator.
 			//
 			// Tiny allocator combines several tiny allocation requests
@@ -1031,8 +1035,10 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 				return x
 			}
 			// Allocate a new maxTinySize block.
+			// 先线程缓存找到跨度类对应的内存管理单元
 			span = c.alloc[tinySpanClass]
 			v := nextFreeFast(span)
+			// 当不存在空闲内存时，我们会调用 runtime.mcache.nextFree 从中心缓存或者页堆中获取可分配的内存块
 			if v == 0 {
 				v, span, shouldhelpgc = c.nextFree(tinySpanClass)
 			}
@@ -1047,7 +1053,9 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 			}
 			size = maxTinySize
 		} else {
+			// 小对象分配
 			var sizeclass uint8
+			// 确定分配对象的大小以及跨度类 runtime.spanClass
 			if size <= smallSizeMax-8 {
 				sizeclass = size_to_class8[divRoundUp(size, smallSizeDiv)]
 			} else {
@@ -1066,6 +1074,8 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 			}
 		}
 	} else {
+		// 大对象分配
+		// 运行时对于大于 32KB 的大对象会单独处理，我们不会从线程缓存或者中心缓存中获取内存管理单元，而是直接在系统的栈中调用 runtime.largeAlloc 函数分配大片的内存
 		shouldhelpgc = true
 		systemstack(func() {
 			span = largeAlloc(size, needzero, noscan)
@@ -1157,6 +1167,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	return x
 }
 
+// 计算分配该对象所需要的页数，它会按照 8KB 的倍数为对象在堆上申请内存
 func largeAlloc(size uintptr, needzero bool, noscan bool) *mspan {
 	// print("largeAlloc size=", size, "\n")
 

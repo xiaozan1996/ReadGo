@@ -17,6 +17,7 @@ import "runtime/internal/atomic"
 // Central list of free objects of a given size.
 //
 //go:notinheap
+// 内存分配器的中心缓存
 type mcentral struct {
 	spanclass spanClass
 
@@ -48,7 +49,7 @@ type mcentral struct {
 	// nmalloc is the cumulative count of objects allocated from
 	// this mcentral, assuming all spans in mcaches are
 	// fully-allocated. Written atomically, read under STW.
-	nmalloc uint64
+	nmalloc uint64 // 构体中分配的对象个数
 }
 
 // Initialize a single central free list.
@@ -85,6 +86,12 @@ func (c *mcentral) fullSwept(sweepgen uint32) *spanSet {
 }
 
 // Allocate a span to use in an mcache.
+/* 线程缓存会通过中心缓存的 runtime.mcentral.cacheSpan 方法获取新的内存管理单元，该方法的实现比较复杂，我们可以将其分成以下几个部分：
+
+从有空闲对象的 runtime.mspan 链表中查找可以使用的内存管理单元；
+从没有空闲对象的 runtime.mspan 链表中查找可以使用的内存管理单元；
+调用 runtime.mcentral.grow 从堆中申请新的内存管理单元；
+更新内存管理单元的 allocCache 等字段帮助快速分配内存； */
 func (c *mcentral) cacheSpan() *mspan {
 	// Deduct credit for this span allocation and sweep if necessary.
 	spanBytes := uintptr(class_to_allocnpages[c.spanclass.sizeclass()]) * _PageSize
@@ -145,6 +152,7 @@ func (c *mcentral) cacheSpan() *mspan {
 			break
 		}
 		if atomic.Load(&s.sweepgen) == sg-2 && atomic.Cas(&s.sweepgen, sg-2, sg-1) {
+			// 当内存单元等待回收时，将其插入 empty 链表、调用 runtime.mspan.sweep 清理该单元并返回
 			// We got ownership of the span, so let's sweep it.
 			s.sweep(true)
 			// Check if there's any free space.
@@ -163,6 +171,7 @@ func (c *mcentral) cacheSpan() *mspan {
 		traceDone = true
 	}
 
+	// 如果 runtime.mcentral 在两个链表中都没有找到可用的内存单元，它会调用 runtime.mcentral.grow 触发扩容操作从堆中申请新的内存
 	// We failed to get a span from the mcentral so get one from mheap.
 	s = c.grow()
 	if s == nil {
@@ -268,6 +277,7 @@ func (c *mcentral) uncacheSpan(s *mspan) {
 }
 
 // grow allocates a new empty span from the heap and initializes it for c's size class.
+// 根据预先计算的 class_to_allocnpages 和 class_to_size 获取待分配的页数以及跨度类并调用 runtime.mheap.alloc 获取新的 runtime.mspan 结构
 func (c *mcentral) grow() *mspan {
 	npages := uintptr(class_to_allocnpages[c.spanclass.sizeclass()])
 	size := uintptr(class_to_size[c.spanclass.sizeclass()])

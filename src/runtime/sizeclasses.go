@@ -72,6 +72,7 @@ package runtime
 //    66      28672       57344        2           0      4.91%
 //    67      32768       32768        1           0     12.50%
 
+//Go 语言的内存管理模块中一共包含 67 种跨度类，每一个跨度类都会存储特定大小的对象并且包含特定数量的页数以及对象，所有的数据都会被预选计算好并存储在 runtime.class_to_size 和 runtime.class_to_allocnpages 等变量中
 const (
 	_MaxSmallSize   = 32768
 	smallSizeDiv    = 8
