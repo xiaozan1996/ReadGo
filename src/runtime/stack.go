@@ -155,6 +155,7 @@ var stackLarge struct {
 	free [heapAddrBits - pageShift]mSpanList // free lists by log_2(s.npages)
 }
 
+//初始化全局的栈缓存和大栈缓存
 func stackinit() {
 	if _StackCacheSize&_PageMask != 0 {
 		throw("cache size must be a multiple of page size")
@@ -324,6 +325,7 @@ func stackcache_clear(c *mcache) {
 // resources and must not split the stack.
 //
 //go:systemstack
+// 栈分配
 func stackalloc(n uint32) stack {
 	// Stackalloc must be called on scheduler stack, so that we
 	// never try to grow the stack during the code that stackalloc runs.
@@ -352,7 +354,7 @@ func stackalloc(n uint32) stack {
 	// If we need a stack of a bigger size, we fall back on allocating
 	// a dedicated span.
 	var v unsafe.Pointer
-	if n < _FixedStack<<_NumStackOrders && n < _StackCacheSize {
+	if n < _FixedStack<<_NumStackOrders && n < _StackCacheSize { // 如果栈空间较小，使用全局栈缓存或者线程缓存上固定大小的空闲链表分配内存
 		order := uint8(0)
 		n2 := n
 		for n2 > _FixedStack {
@@ -366,20 +368,20 @@ func stackalloc(n uint32) stack {
 			// Also don't touch stackcache during gc
 			// as it's flushed concurrently.
 			lock(&stackpool[order].item.mu)
-			x = stackpoolalloc(order)
+			x = stackpoolalloc(order) //  在全局的栈缓存池 runtime.stackpool 中获取新的内存，如果栈缓存池中不包含剩余的内存，运行时会从堆上申请一片内存空间
 			unlock(&stackpool[order].item.mu)
 		} else {
 			c := thisg.m.p.ptr().mcache
-			x = c.stackcache[order].list
+			x = c.stackcache[order].list // 如果线程缓存中包含足够的空间，我们可以从线程本地的缓存中获取内存
 			if x.ptr() == nil {
-				stackcacherefill(c, order)
+				stackcacherefill(c, order) // 一旦发现空间不足就会调用 runtime.stackcacherefill 从堆上获取新的内存。
 				x = c.stackcache[order].list
 			}
 			c.stackcache[order].list = x.ptr().next
 			c.stackcache[order].size -= uintptr(n)
 		}
 		v = unsafe.Pointer(x)
-	} else {
+	} else { // 如果栈空间较大，从全局的大栈缓存 runtime.stackLarge 中获取内存空间；
 		var s *mspan
 		npage := uintptr(n) >> _PageShift
 		log2npage := stacklog2(npage)
@@ -396,7 +398,7 @@ func stackalloc(n uint32) stack {
 
 		if s == nil {
 			// Allocate a new stack from the heap.
-			s = mheap_.allocManual(npage, &memstats.stacks_inuse)
+			s = mheap_.allocManual(npage, &memstats.stacks_inuse) // 如果 Goroutine 申请的内存空间过大，运行时会查看 runtime.stackLarge 中是否有剩余的空间，如果不存在剩余空间，它也会从堆上申请新的内存
 			if s == nil {
 				throw("out of memory")
 			}
@@ -835,6 +837,7 @@ func syncadjustsudogs(gp *g, used uintptr, adjinfo *adjustinfo) uintptr {
 
 // Copies gp's stack to a new stack of a different size.
 // Caller must have changed gp status to Gcopystack.
+//  栈的拷贝
 func copystack(gp *g, newsize uintptr) {
 	if gp.syscallsp != 0 {
 		throw("stack growth not allowed in system call")
@@ -846,7 +849,7 @@ func copystack(gp *g, newsize uintptr) {
 	used := old.hi - gp.sched.sp
 
 	// allocate new stack
-	new := stackalloc(uint32(newsize))
+	new := stackalloc(uint32(newsize)) // 分配新的栈空间
 	if stackPoisonCopy != 0 {
 		fillstack(new, 0xfd)
 	}
@@ -861,6 +864,7 @@ func copystack(gp *g, newsize uintptr) {
 
 	// Adjust sudogs, synchronizing with channel ops if necessary.
 	ncopy := used
+	// 调用 runtime.adjustsudogs 或者 runtime.syncadjustsudogs 调整 runtime.sudog 结构体的指针
 	if !gp.activeStackChans {
 		if newsize < old.hi-old.lo && atomic.Load8(&gp.parkingOnChan) != 0 {
 			// It's not safe for someone to shrink this stack while we're actively
@@ -886,11 +890,12 @@ func copystack(gp *g, newsize uintptr) {
 	}
 
 	// Copy the stack (or the rest of it) to the new location
-	memmove(unsafe.Pointer(new.hi-ncopy), unsafe.Pointer(old.hi-ncopy), ncopy)
+	memmove(unsafe.Pointer(new.hi-ncopy), unsafe.Pointer(old.hi-ncopy), ncopy) // 将源栈中的整片内存拷贝到新的栈中
 
 	// Adjust remaining structures that have pointers into stacks.
 	// We have to do most of these before we traceback the new
 	// stack because gentraceback uses them.
+	// 调整剩余 Goroutine 相关数据结构的指针
 	adjustctxt(gp, &adjinfo)
 	adjustdefers(gp, &adjinfo)
 	adjustpanics(gp, &adjinfo)
@@ -935,6 +940,7 @@ func round2(x int32) int32 {
 // compiler doesn't check this.
 //
 //go:nowritebarrierrec
+// 创建新的栈
 func newstack() {
 	thisg := getg()
 	// TODO: double check all gp. shouldn't be getg().
@@ -1123,6 +1129,7 @@ func isShrinkStackSafe(gp *g) bool {
 //
 // gp must be stopped and we must own its stack. It may be in
 // _Grunning, but only if this is our own user G.
+// 栈缩容
 func shrinkstack(gp *g) {
 	if gp.stack.lo == 0 {
 		throw("missing stack in shrinkstack")
@@ -1156,6 +1163,7 @@ func shrinkstack(gp *g) {
 		return
 	}
 
+	// 如果要触发栈的缩容，新栈的大小会是原始栈的一半，不过如果新栈的大小低于程序的最低限制 2KB，那么缩容的过程就会停止
 	oldsize := gp.stack.hi - gp.stack.lo
 	newsize := oldsize / 2
 	// Don't shrink the allocation below the minimum-sized stack
@@ -1169,7 +1177,7 @@ func shrinkstack(gp *g) {
 	// down to the SP plus the stack guard space that ensures
 	// there's room for nosplit functions.
 	avail := gp.stack.hi - gp.stack.lo
-	if used := gp.stack.hi - gp.sched.sp + _StackLimit; used >= avail/4 {
+	if used := gp.stack.hi - gp.sched.sp + _StackLimit; used >= avail/4 { // 运行时只会在栈内存使用不足 1/4 时进行缩容，缩容也会调用扩容时使用的 runtime.copystack 函数开辟新的栈空间
 		return
 	}
 

@@ -41,7 +41,7 @@ type mcache struct {
 
 	alloc [numSpanClasses]*mspan // spans to allocate from, indexed by spanClass
 
-	stackcache [_NumStackOrders]stackfreelist
+	stackcache [_NumStackOrders]stackfreelist // 每一个线程缓存 runtime.mcache 中都加入了栈缓存减少锁竞争影响
 
 	// Local allocator stats, flushed during GC.
 	local_largefree  uintptr                  // bytes freed for large objects (>maxsmallsize)

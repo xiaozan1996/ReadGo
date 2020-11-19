@@ -399,6 +399,7 @@ type wincallbackcontext struct {
 // Stack describes a Go execution stack.
 // The bounds of the stack are exactly [lo, hi),
 // with no implicit data structures on either side.
+// 执行栈
 type stack struct {
 	lo uintptr
 	hi uintptr
