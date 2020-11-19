@@ -249,6 +249,7 @@ func init() {
 	go forcegchelper()
 }
 
+// 运行时会在应用程序启动时在后台开启一个用于强制触发垃圾收集的 Goroutine
 func forcegchelper() {
 	forcegc.g = getg()
 	lockInit(&forcegc.lock, lockRankForcegc)
@@ -997,6 +998,7 @@ var gcsema uint32 = 1
 // startTheWorldWithSema and stopTheWorldWithSema.
 // Holding worldsema causes any other goroutines invoking
 // stopTheWorld to block.
+// 暂停程序
 func stopTheWorldWithSema() {
 	_g_ := getg()
 
@@ -1009,7 +1011,7 @@ func stopTheWorldWithSema() {
 	lock(&sched.lock)
 	sched.stopwait = gomaxprocs
 	atomic.Store(&sched.gcwaiting, 1)
-	preemptall()
+	preemptall() // 调用runtime.preemptone
 	// stop current P
 	_g_.m.p.ptr().status = _Pgcstop // Pgcstop is only diagnostic.
 	sched.stopwait--
@@ -1073,10 +1075,11 @@ func stopTheWorldWithSema() {
 	}
 }
 
+// 恢复程序
 func startTheWorldWithSema(emitTraceEvent bool) int64 {
 	mp := acquirem() // disable preemption because it can be holding p in a local var
 	if netpollinited() {
-		list := netpoll(0) // non-blocking
+		list := netpoll(0) // non-blocking 从网络轮询器中获取待处理的任务并加入全局队列
 		injectglist(&list)
 	}
 	lock(&sched.lock)
@@ -1086,11 +1089,11 @@ func startTheWorldWithSema(emitTraceEvent bool) int64 {
 		procs = newprocs
 		newprocs = 0
 	}
-	p1 := procresize(procs)
+	p1 := procresize(procs) // 扩容或者缩容全局的处理器
 	sched.gcwaiting = 0
 	if sched.sysmonwait != 0 {
 		sched.sysmonwait = 0
-		notewakeup(&sched.sysmonnote)
+		notewakeup(&sched.sysmonnote) // 依次唤醒处理器或者为处理器创建新的线程
 	}
 	unlock(&sched.lock)
 
@@ -1104,10 +1107,10 @@ func startTheWorldWithSema(emitTraceEvent bool) int64 {
 				throw("startTheWorld: inconsistent mp->nextp")
 			}
 			mp.nextp.set(p)
-			notewakeup(&mp.park)
+			notewakeup(&mp.park) // 依次唤醒处理器
 		} else {
 			// Start M to run P.  Do not start another M below.
-			newm(nil, p, -1)
+			newm(nil, p, -1) // 或者为处理器创建新的线程
 		}
 	}
 

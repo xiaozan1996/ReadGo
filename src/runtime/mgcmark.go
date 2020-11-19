@@ -973,13 +973,14 @@ const (
 // gcDrain will always return if there is a pending STW.
 //
 //go:nowritebarrier
+// 扫描工作缓冲区中的灰色对象，它会根据传入 gcDrainFlags 的不同选择不同的策略
 func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 	if !writeBarrier.needed {
 		throw("gcDrain phase incorrect")
 	}
 
 	gp := getg().m.curg
-	preemptible := flags&gcDrainUntilPreempt != 0
+	preemptible := flags&gcDrainUntilPreempt != 0 // 当 Goroutine 的 preempt 字段被设置成 true 时返回
 	flushBgCredit := flags&gcDrainFlushBgCredit != 0
 	idle := flags&gcDrainIdle != 0
 
@@ -1006,7 +1007,7 @@ func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 			if job >= work.markrootJobs {
 				break
 			}
-			markroot(gcw, job)
+			markroot(gcw, job) // 扫描缓存、数据段、存放全局变量和静态变量的 BSS 段以及 Goroutine 的栈内存；
 			if check != nil && check() {
 				goto done
 			}
@@ -1015,6 +1016,7 @@ func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 
 	// Drain heap marking jobs.
 	// Stop if we're preemptible or if someone wants to STW.
+	// 一旦完成了对根对象的扫描，当前 Goroutine 会开始从本地和全局的工作缓存池中获取待执行的任务
 	for !(gp.preempt && (preemptible || atomic.Load(&sched.gcwaiting) != 0)) {
 		// Try to keep work available on the global queue. We used to
 		// check if there were waiting workers, but it's better to
@@ -1040,7 +1042,7 @@ func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 			// Unable to get work.
 			break
 		}
-		scanobject(b, gcw)
+		scanobject(b, gcw) // 从传入的位置开始扫描，扫描期间会调用 runtime.greyobject 为找到的活跃对象上色
 
 		// Flush background scan work credit to the global
 		// account if we've accumulated enough locally so
@@ -1068,7 +1070,7 @@ done:
 	if gcw.scanWork > 0 {
 		atomic.Xaddint64(&gcController.scanWork, gcw.scanWork)
 		if flushBgCredit {
-			gcFlushBgCredit(gcw.scanWork - initScanWork)
+			gcFlushBgCredit(gcw.scanWork - initScanWork) // 当本轮的扫描因为外部条件变化而中断时，该函数会通过 runtime.gcFlushBgCredit 记录这次扫描的内存字节数用于减少辅助标记的工作量
 		}
 		gcw.scanWork = 0
 	}

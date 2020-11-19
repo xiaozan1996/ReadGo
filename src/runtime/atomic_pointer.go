@@ -29,7 +29,7 @@ func atomicwb(ptr *unsafe.Pointer, new unsafe.Pointer) {
 //
 //go:nosplit
 func atomicstorep(ptr unsafe.Pointer, new unsafe.Pointer) {
-	if writeBarrier.enabled {
+	if writeBarrier.enabled { // 写屏障
 		atomicwb((*unsafe.Pointer)(ptr), new)
 	}
 	atomic.StorepNoWB(noescape(ptr), new)
@@ -45,7 +45,7 @@ func sync_atomic_StoreUintptr(ptr *uintptr, new uintptr)
 //go:linkname sync_atomic_StorePointer sync/atomic.StorePointer
 //go:nosplit
 func sync_atomic_StorePointer(ptr *unsafe.Pointer, new unsafe.Pointer) {
-	if writeBarrier.enabled {
+	if writeBarrier.enabled { // 写屏障
 		atomicwb(ptr, new)
 	}
 	sync_atomic_StoreUintptr((*uintptr)(unsafe.Pointer(ptr)), uintptr(new))
@@ -57,7 +57,7 @@ func sync_atomic_SwapUintptr(ptr *uintptr, new uintptr) uintptr
 //go:linkname sync_atomic_SwapPointer sync/atomic.SwapPointer
 //go:nosplit
 func sync_atomic_SwapPointer(ptr *unsafe.Pointer, new unsafe.Pointer) unsafe.Pointer {
-	if writeBarrier.enabled {
+	if writeBarrier.enabled { // 写屏障
 		atomicwb(ptr, new)
 	}
 	old := unsafe.Pointer(sync_atomic_SwapUintptr((*uintptr)(noescape(unsafe.Pointer(ptr))), uintptr(new)))
@@ -70,7 +70,7 @@ func sync_atomic_CompareAndSwapUintptr(ptr *uintptr, old, new uintptr) bool
 //go:linkname sync_atomic_CompareAndSwapPointer sync/atomic.CompareAndSwapPointer
 //go:nosplit
 func sync_atomic_CompareAndSwapPointer(ptr *unsafe.Pointer, old, new unsafe.Pointer) bool {
-	if writeBarrier.enabled {
+	if writeBarrier.enabled { // 写屏障
 		atomicwb(ptr, new)
 	}
 	return sync_atomic_CompareAndSwapUintptr((*uintptr)(noescape(unsafe.Pointer(ptr))), uintptr(old), uintptr(new))

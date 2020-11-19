@@ -1061,6 +1061,8 @@ var work struct {
 // GC runs a garbage collection and blocks the caller until the
 // garbage collection is complete. It may also block the entire
 // program.
+// 手动触发gc
+// 用户程序会通过 runtime.GC 函数在程序运行期间主动通知运行时执行，该方法在调用时会阻塞调用方直到当前垃圾收集循环完成，在垃圾收集期间也可能会通过 STW 暂停整个程序
 func GC() {
 	// We consider a cycle to be: sweep termination, mark, mark
 	// termination, and sweep. This function shouldn't return
@@ -1089,7 +1091,7 @@ func GC() {
 	// Wait until the current sweep termination, mark, and mark
 	// termination complete.
 	n := atomic.Load(&work.cycles)
-	gcWaitOnMark(n)
+	gcWaitOnMark(n) // 等待上一个循环的标记终止、标记和标记终止阶段完成
 
 	// We're now in sweep N or later. Trigger GC cycle N+1, which
 	// will first finish sweep N if necessary and then enter sweep
@@ -1103,7 +1105,7 @@ func GC() {
 	// complete the cycle and because runtime.GC() is often used
 	// as part of tests and benchmarks to get the system into a
 	// relatively stable and isolated state.
-	for atomic.Load(&work.cycles) == n+1 && sweepone() != ^uintptr(0) {
+	for atomic.Load(&work.cycles) == n+1 && sweepone() != ^uintptr(0) { // 持续调用 runtime.sweepone 清理全部待处理的内存管理单元并等待所有的清理工作完成，等待期间会调用 runtime.Gosched 让出处理器
 		sweep.nbgsweep++
 		Gosched()
 	}
@@ -1129,7 +1131,7 @@ func GC() {
 	mp := acquirem()
 	cycle := atomic.Load(&work.cycles)
 	if cycle == n+1 || (gcphase == _GCmark && cycle == n+2) {
-		mProf_PostSweep()
+		mProf_PostSweep() // 将该阶段的堆内存状态快照发布出来，我们可以获取这时的内存状态
 	}
 	releasem(mp)
 }
@@ -1197,24 +1199,25 @@ const (
 // test reports whether the trigger condition is satisfied, meaning
 // that the exit condition for the _GCoff phase has been met. The exit
 // condition should be tested when allocating.
+// 决定是否需要触发垃圾收集
 func (t gcTrigger) test() bool {
 	if !memstats.enablegc || panicking != 0 || gcphase != _GCoff {
 		return false
 	}
 	switch t.kind {
-	case gcTriggerHeap:
+	case gcTriggerHeap: // 堆内存的分配达到达控制器计算的触发堆大小
 		// Non-atomic access to heap_live for performance. If
 		// we are going to trigger on this, this thread just
 		// atomically wrote heap_live anyway and we'll see our
 		// own write.
 		return memstats.heap_live >= memstats.gc_trigger
-	case gcTriggerTime:
+	case gcTriggerTime: // 如果一定时间内没有触发，就会触发新的循环，该出发条件由 runtime.forcegcperiod 变量控制，默认为 2 分钟
 		if gcpercent < 0 {
 			return false
 		}
 		lastgc := int64(atomic.Load64(&memstats.last_gc_nanotime))
 		return lastgc != 0 && t.now-lastgc > forcegcperiod
-	case gcTriggerCycle:
+	case gcTriggerCycle: // 如果当前没有开启垃圾收集，则触发新的循环
 		// t.n > work.cycles, but accounting for wraparound.
 		return int32(t.n-work.cycles) > 0
 	}
@@ -1227,6 +1230,7 @@ func (t gcTrigger) test() bool {
 //
 // This may return without performing this transition in some cases,
 // such as when called on a system stack or with locks held.
+// 垃圾收集启动
 func gcStart(trigger gcTrigger) {
 	// Since this is called from malloc and malloc is called in
 	// the guts of a number of libraries that might be holding
@@ -1250,7 +1254,7 @@ func gcStart(trigger gcTrigger) {
 	//
 	// We check the transition condition continuously here in case
 	// this G gets delayed in to the next GC cycle.
-	for trigger.test() && sweepone() != ^uintptr(0) {
+	for trigger.test() && sweepone() != ^uintptr(0) { // 验证垃圾收集条件的同时，该方法还会在循环中不断调用 runtime.sweepone 清理已经被标记的内存单元，完成上一个垃圾收集循环的收尾工作
 		sweep.nbgsweep++
 	}
 
@@ -1258,7 +1262,7 @@ func gcStart(trigger gcTrigger) {
 	// transition.
 	semacquire(&work.startSema)
 	// Re-check transition condition under transition lock.
-	if !trigger.test() {
+	if !trigger.test() { // 检查是否满足垃圾收集条件
 		semrelease(&work.startSema)
 		return
 	}
@@ -1280,7 +1284,7 @@ func gcStart(trigger gcTrigger) {
 	// Ok, we're doing it! Stop everybody else
 	semacquire(&gcsema)
 	semacquire(&worldsema)
-
+	// 暂停程序、在后台启动用于处理标记任务的工作 Goroutine、确定所有内存管理单元都被清理以及其他标记阶段开始前的准备工作
 	if trace.enabled {
 		traceGCStart()
 	}
@@ -1293,7 +1297,7 @@ func gcStart(trigger gcTrigger) {
 		}
 	}
 
-	gcBgMarkStartWorkers()
+	gcBgMarkStartWorkers() // 进入标记阶段
 
 	systemstack(gcResetMarkState)
 
@@ -1351,8 +1355,8 @@ func gcStart(trigger gcTrigger) {
 	// possible.
 	setGCPhase(_GCmark)
 
-	gcBgMarkPrepare() // Must happen before assist enable.
-	gcMarkRootPrepare()
+	gcBgMarkPrepare()   // Must happen before assist enable. 初始化后台扫描需要的状态
+	gcMarkRootPrepare() //  扫描栈上、全局变量等根对象并将它们加入队列
 
 	// Mark all active tinyalloc blocks. Since we're
 	// allocating from these, they need to be black like
@@ -1366,7 +1370,7 @@ func gcStart(trigger gcTrigger) {
 	// black invariant. Enable mutator assists to
 	// put back-pressure on fast allocating
 	// mutators.
-	atomic.Store(&gcBlackenEnabled, 1)
+	atomic.Store(&gcBlackenEnabled, 1) // 设置全局变量 runtime.gcBlackenEnabled，用户程序和标记任务可以将对象涂黑
 
 	// Assists and workers can start the moment we start
 	// the world.
@@ -1378,7 +1382,7 @@ func gcStart(trigger gcTrigger) {
 
 	// Concurrent mark.
 	systemstack(func() {
-		now = startTheWorldWithSema(trace.enabled)
+		now = startTheWorldWithSema(trace.enabled) // 后台任务也会开始标记堆中的对象
 		work.pauseNS += now - work.pauseStart
 		work.tMark = now
 	})
@@ -1441,6 +1445,7 @@ var gcWorkPauseGen uint32 = 1
 // it does transition to mark termination, then all reachable objects
 // have been marked, so the write barrier cannot shade any more
 // objects.
+// 标记完成
 func gcMarkDone() {
 	// Ensure only one thread is running the ragged barrier at a
 	// time.
@@ -1627,7 +1632,7 @@ top:
 	nextTriggerRatio := gcController.endCycle()
 
 	// Perform mark termination. This will restart the world.
-	gcMarkTermination(nextTriggerRatio)
+	gcMarkTermination(nextTriggerRatio) // 进入终止标记阶段
 }
 
 func gcMarkTermination(nextTriggerRatio float64) {
@@ -1831,6 +1836,7 @@ func gcMarkTermination(nextTriggerRatio float64) {
 // These goroutines will not run until the mark phase, but they must
 // be started while the work is not stopped and from a regular G
 // stack. The caller must hold worldsema.
+// 为全局每个处理器创建用于执行后台标记任务的 Goroutine，每一个 Goroutine 都会运行 runtime.gcBgMarkWorker，所有运行 runtime.gcBgMarkWorker 的 Goroutine 在启动后都会陷入休眠等待调度器的唤醒
 func gcBgMarkStartWorkers() {
 	// Background marking is performed by per-P G's. Ensure that
 	// each P has a background GC G.
@@ -1859,6 +1865,7 @@ func gcBgMarkPrepare() {
 	work.nwait = ^uint32(0)
 }
 
+// 后台的标记任务执行的函数
 func gcBgMarkWorker(_p_ *p) {
 	gp := getg()
 
@@ -1888,7 +1895,7 @@ func gcBgMarkWorker(_p_ *p) {
 		// Go to sleep until woken by gcController.findRunnable.
 		// We can't releasem yet since even the call to gopark
 		// may be preempted.
-		gopark(func(g *g, parkp unsafe.Pointer) bool {
+		gopark(func(g *g, parkp unsafe.Pointer) bool { // gopark触发休眠
 			park := (*parkInfo)(parkp)
 
 			// The worker G is no longer running, so it's
@@ -1951,11 +1958,11 @@ func gcBgMarkWorker(_p_ *p) {
 			// disabled for mark workers, so it is safe to
 			// read from the G stack.
 			casgstatus(gp, _Grunning, _Gwaiting)
-			switch _p_.gcMarkWorkerMode {
+			switch _p_.gcMarkWorkerMode { // 根据处理器上的 gcMarkWorkerMode 模式决定扫描任务的策略
 			default:
 				throw("gcBgMarkWorker: unexpected gcMarkWorkerMode")
 			case gcMarkWorkerDedicatedMode:
-				gcDrain(&_p_.gcw, gcDrainUntilPreempt|gcDrainFlushBgCredit)
+				gcDrain(&_p_.gcw, gcDrainUntilPreempt|gcDrainFlushBgCredit) // 扫描工作缓冲区 runtime.gcWork
 				if gp.preempt {
 					// We were preempted. This is
 					// a useful signal to kick
@@ -2007,6 +2014,7 @@ func gcBgMarkWorker(_p_ *p) {
 
 		// If this worker reached a background mark completion
 		// point, signal the main GC goroutine.
+		// 当所有的后台工作任务都陷入等待并且没有剩余工作时，我们就认为该轮垃圾收集的标记阶段结束了
 		if incnwait == work.nproc && !gcMarkWorkAvailable(nil) {
 			// Make this G preemptible and disassociate it
 			// as the worker for this P so

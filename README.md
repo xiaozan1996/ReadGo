@@ -21,3 +21,4 @@ go 源码阅读+中文注解
 11.17 /root/ReadGo/src/runtime/netpoll.go  网络轮询器  
 11.18 /root/ReadGo/src/runtime/proc.go 系统监控  
 11.19 /root/ReadGo/src/runtime/malloc.go  内存分配器  
+11.19 /root/ReadGo/src/runtime/mgc.go gc  
